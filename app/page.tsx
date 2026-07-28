@@ -112,6 +112,7 @@ export default function Home() {
   const [mode, setMode] = useState<"order" | "admin">("order");
   const [status, setStatus] = useState("");
   const [toast, setToast] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [shareLink, setShareLink] = useState("");
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
   const [isPasswordOpen, setIsPasswordOpen] = useState(false);
@@ -232,20 +233,28 @@ export default function Home() {
 
   async function submitOrder(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitting) {
+      return;
+    }
+
     setStatus("");
+    setIsSubmitting(true);
 
     if (!customer.name.trim() || !customer.phone.trim()) {
       setStatus("이름과 전화번호를 입력해 주세요.");
+      setIsSubmitting(false);
       return;
     }
 
     if (cart.length === 0) {
       setStatus("상품을 1박스 이상 담아 주세요.");
+      setIsSubmitting(false);
       return;
     }
 
     if (!settings.sheetEndpoint.trim()) {
       setStatus("주문 내용이 준비됐어요. 관리자 화면에서 구글시트 주소를 연결해 주세요.");
+      setIsSubmitting(false);
       return;
     }
 
@@ -277,6 +286,8 @@ export default function Home() {
       setStatus("주문이 접수됐어요. 계좌이체 후 확인 문자를 기다려 주세요.");
     } catch {
       setStatus("주문 전송에 실패했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -316,7 +327,8 @@ export default function Home() {
                     <div className="flex items-center gap-2">
                       <button
                         aria-label={`${product.name} 수량 빼기`}
-                        className="h-9 w-9 rounded-full border border-[#cabf9e] text-xl font-bold"
+                        className="h-9 w-9 rounded-full border border-[#cabf9e] text-xl font-bold disabled:opacity-40"
+                        disabled={isSubmitting}
                         onClick={() => updateQuantity(product.id, -1)}
                         type="button"
                       >
@@ -325,7 +337,8 @@ export default function Home() {
                       <span className="w-8 text-center text-lg font-black">{quantity}</span>
                       <button
                         aria-label={`${product.name} 수량 더하기`}
-                        className="h-9 w-9 rounded-full bg-[#426b2f] text-xl font-bold text-white"
+                        className="h-9 w-9 rounded-full bg-[#426b2f] text-xl font-bold text-white disabled:opacity-40"
+                        disabled={isSubmitting}
                         onClick={() => updateQuantity(product.id, 1)}
                         type="button"
                       >
@@ -367,6 +380,7 @@ export default function Home() {
                 이름
                 <input
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                  disabled={isSubmitting}
                   onChange={(event) =>
                     setCustomer((current) => ({ ...current, name: event.target.value }))
                   }
@@ -378,6 +392,7 @@ export default function Home() {
                 전화번호
                 <input
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                  disabled={isSubmitting}
                   inputMode="tel"
                   onChange={(event) =>
                     setCustomer((current) => ({ ...current, phone: event.target.value }))
@@ -390,6 +405,7 @@ export default function Home() {
                 요청사항
                 <textarea
                   className="min-h-24 rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                  disabled={isSubmitting}
                   onChange={(event) =>
                     setCustomer((current) => ({ ...current, note: event.target.value }))
                   }
@@ -419,10 +435,11 @@ export default function Home() {
             ) : null}
 
             <button
-              className="sticky bottom-4 mt-auto rounded-lg bg-[#426b2f] px-4 py-4 text-lg font-black text-white shadow-lg"
+              className="sticky bottom-4 mt-auto rounded-lg bg-[#426b2f] px-4 py-4 text-lg font-black text-white shadow-lg disabled:cursor-not-allowed disabled:bg-[#8ba07f]"
+              disabled={isSubmitting}
               type="submit"
             >
-              주문서 보내기
+              {isSubmitting ? "전송 중..." : "주문서 보내기"}
             </button>
           </form>
         ) : (
