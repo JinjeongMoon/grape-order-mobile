@@ -46,6 +46,10 @@ function toCurrency(value: number) {
   return `${won.format(value)}원`;
 }
 
+function getCopyableBankInfo(bankNotice: string) {
+  return bankNotice.replace(/^\s*계좌이체\s*:\s*/, "").trim();
+}
+
 function encodeSettings(settings: Settings) {
   const compact = JSON.stringify(settings);
   return btoa(unescape(encodeURIComponent(compact)));
@@ -106,7 +110,12 @@ export default function Home() {
   });
   const [mode, setMode] = useState<"order" | "admin">("order");
   const [status, setStatus] = useState("");
+  const [toast, setToast] = useState("");
   const [shareLink, setShareLink] = useState("");
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [isPasswordOpen, setIsPasswordOpen] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
 
   useEffect(() => {
     const next = loadSettingsFromUrl();
@@ -115,6 +124,15 @@ export default function Home() {
       Object.fromEntries(next.products.map((product) => [product.id, 0])),
     );
   }, []);
+
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setToast(""), 2000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   const activeProducts = useMemo(
     () => settings.products.filter((product) => product.name && product.price > 0),
@@ -171,12 +189,43 @@ export default function Home() {
     setStatus("설정이 저장됐어요. 아래 공개 링크를 손님에게 보내면 됩니다.");
   }
 
+  function handleModeButton() {
+    if (mode === "admin") {
+      setMode("order");
+      return;
+    }
+
+    if (isAdminUnlocked) {
+      setMode("admin");
+      return;
+    }
+
+    setAdminPassword("");
+    setPasswordError("");
+    setIsPasswordOpen(true);
+  }
+
+  function submitAdminPassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (adminPassword === "2026") {
+      setIsAdminUnlocked(true);
+      setIsPasswordOpen(false);
+      setMode("admin");
+      setPasswordError("");
+      return;
+    }
+
+    setPasswordError("비밀번호가 맞지 않습니다.");
+  }
+
   async function copyBankNotice() {
     try {
-      await navigator.clipboard.writeText(settings.bankNotice);
-      setStatus("계좌 안내 문구를 복사했어요.");
+      const bankInfo = getCopyableBankInfo(settings.bankNotice);
+      await navigator.clipboard.writeText(bankInfo || settings.bankNotice);
+      setToast("복사되었습니다");
     } catch {
-      setStatus("복사가 잘 안 됐어요. 계좌 안내 문구를 길게 눌러 복사해 주세요.");
+      setToast("복사에 실패했습니다");
     }
   }
 
@@ -240,7 +289,7 @@ export default function Home() {
           </div>
           <button
             className="rounded-full border border-[#d6ccb6] bg-white px-3 py-2 text-sm font-bold"
-            onClick={() => setMode(mode === "order" ? "admin" : "order")}
+            onClick={handleModeButton}
             type="button"
           >
             {mode === "order" ? "관리" : "주문"}
@@ -503,6 +552,56 @@ export default function Home() {
             ) : null}
           </section>
         )}
+
+        {isPasswordOpen ? (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+            <form
+              className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl"
+              onSubmit={submitAdminPassword}
+            >
+              <h2 className="text-xl font-black">관리자 비밀번호</h2>
+              <p className="mt-1 text-sm font-semibold text-[#6d6a55]">
+                4자리 비밀번호를 입력해 주세요.
+              </p>
+              <input
+                autoFocus
+                className="mt-4 w-full rounded-md border border-[#d8cfba] px-3 py-3 text-center text-2xl font-black tracking-[0.3em]"
+                inputMode="numeric"
+                maxLength={4}
+                onChange={(event) => {
+                  setAdminPassword(event.target.value.replace(/\D/g, "").slice(0, 4));
+                  setPasswordError("");
+                }}
+                type="password"
+                value={adminPassword}
+              />
+              {passwordError ? (
+                <p className="mt-2 text-sm font-bold text-[#b33a2b]">{passwordError}</p>
+              ) : null}
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  className="rounded-lg border border-[#d6ccb6] px-4 py-3 font-black"
+                  onClick={() => setIsPasswordOpen(false)}
+                  type="button"
+                >
+                  취소
+                </button>
+                <button
+                  className="rounded-lg bg-[#202016] px-4 py-3 font-black text-white"
+                  type="submit"
+                >
+                  확인
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
+
+        {toast ? (
+          <div className="fixed left-1/2 top-5 z-50 -translate-x-1/2 rounded-full bg-[#202016] px-5 py-3 text-sm font-black text-white shadow-xl">
+            {toast}
+          </div>
+        ) : null}
       </section>
     </main>
   );
