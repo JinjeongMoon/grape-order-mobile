@@ -37,7 +37,8 @@ const defaultSettings: Settings = {
     { id: "product-5", name: "프리미엄 포도박스", price: 55000 },
   ],
   bankNotice: "계좌이체: 은행명 000-0000-0000 예금주 홍길동",
-  sheetEndpoint: "",
+  sheetEndpoint:
+    "https://script.google.com/macros/s/AKfycbw97tf6AbG1mbGDxU3fAdPF1QCaaD8dIS3zlX-v8Ykaf3SDw5AK8Z-WetJAMOt4y4lM4A/exec",
 };
 
 const won = new Intl.NumberFormat("ko-KR");
@@ -63,7 +64,7 @@ function decodeSettings(value: string): Settings | null {
       shopName: parsed.shopName || defaultSettings.shopName,
       products: normalizeProducts(parsed.products),
       bankNotice: parsed.bankNotice || defaultSettings.bankNotice,
-      sheetEndpoint: parsed.sheetEndpoint || "",
+      sheetEndpoint: parsed.sheetEndpoint || defaultSettings.sheetEndpoint,
     };
   } catch {
     return null;
