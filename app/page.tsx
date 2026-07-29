@@ -32,6 +32,8 @@ const giftSetGuide = [
   { id: "product-5", name: "베이직 2KG", composition: "그랑포도 랜덤 1~2종", price: 35000 },
 ];
 
+const fixedBankNotice = "계좌이체: 농협 351-1382-8783-43 황의대";
+
 const defaultSettings: Settings = {
   shopName: "그랑포도",
   introText: `내 가족이 먹는다는 마음으로 깨끗한 자연환경 속에서 한 송이 한 송이 정성껏 키웠습니다.
@@ -45,7 +47,7 @@ const defaultSettings: Settings = {
 < 주문 문의 >
 010-5490-7444`,
   products: giftSetGuide.map(({ id, name, price }) => ({ id, name, price })),
-  bankNotice: "계좌이체: 은행명 000-0000-0000 예금주 홍길동",
+  bankNotice: fixedBankNotice,
   sheetEndpoint:
     "https://script.google.com/macros/s/AKfycbw97tf6AbG1mbGDxU3fAdPF1QCaaD8dIS3zlX-v8Ykaf3SDw5AK8Z-WetJAMOt4y4lM4A/exec",
 };
@@ -217,7 +219,7 @@ function decodeSettings(value: string): Settings | null {
       shopName: parsed.shopName || defaultSettings.shopName,
       introText: parsed.introText || defaultSettings.introText,
       products: defaultSettings.products,
-      bankNotice: parsed.bankNotice || defaultSettings.bankNotice,
+      bankNotice: fixedBankNotice,
       sheetEndpoint: parsed.sheetEndpoint || defaultSettings.sheetEndpoint,
     };
   } catch {
@@ -312,6 +314,7 @@ export default function Home() {
     const normalized = {
       ...settings,
       products: defaultSettings.products,
+      bankNotice: fixedBankNotice,
     };
     const encoded = encodeSettings(normalized);
     window.localStorage.setItem("grape-order-settings", encoded);
@@ -656,7 +659,7 @@ export default function Home() {
             <div className="rounded-lg bg-white p-4">
               <h2 className="text-xl font-black">관리자 설정</h2>
               <p className="mt-1 text-sm font-semibold text-[#6d6a55]">
-                상품과 가격은 고정되어 있으며, 안내문과 계좌정보를 저장할 수 있습니다.
+                상품과 계좌정보는 고정되어 있으며, 안내문과 시트 주소를 저장할 수 있습니다.
               </p>
             </div>
 
@@ -680,20 +683,6 @@ export default function Home() {
                 }
                 placeholder="상품과 구매 안내를 입력해 주세요."
                 value={settings.introText}
-              />
-            </label>
-
-            <label className="grid gap-1 text-sm font-bold">
-              계좌이체 안내 문구
-              <textarea
-                className="min-h-20 rounded-md border border-[#d8cfba] px-3 py-3 text-base"
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    bankNotice: event.target.value,
-                  }))
-                }
-                value={settings.bankNotice}
               />
             </label>
 
