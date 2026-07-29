@@ -24,11 +24,13 @@ type Customer = {
   note: string;
 };
 
-const emptyProducts: Product[] = Array.from({ length: 5 }, (_, index) => ({
-  id: `product-${index + 1}`,
-  name: "",
-  price: 0,
-}));
+const giftSetGuide = [
+  { id: "product-1", name: "명품 4KG", composition: "그랑포도 4~6종", price: 165000 },
+  { id: "product-2", name: "프리미엄 4KG", composition: "그랑포도 랜덤 3~4종", price: 105000 },
+  { id: "product-3", name: "프리미엄 2KG", composition: "그랑포도 랜덤 3~4종", price: 55000 },
+  { id: "product-4", name: "베이직 4KG", composition: "그랑포도 랜덤 1~2종", price: 65000 },
+  { id: "product-5", name: "베이직 2KG", composition: "그랑포도 랜덤 1~2종", price: 35000 },
+];
 
 const defaultSettings: Settings = {
   shopName: "그랑포도",
@@ -42,25 +44,11 @@ const defaultSettings: Settings = {
 
 < 주문 문의 >
 010-5490-7444`,
-  products: [
-    { id: "product-1", name: "샤인머스캣 1박스", price: 35000 },
-    { id: "product-2", name: "캠벨포도 1박스", price: 25000 },
-    { id: "product-3", name: "거봉 1박스", price: 30000 },
-    { id: "product-4", name: "혼합 선물세트", price: 45000 },
-    { id: "product-5", name: "프리미엄 포도박스", price: 55000 },
-  ],
+  products: giftSetGuide.map(({ id, name, price }) => ({ id, name, price })),
   bankNotice: "계좌이체: 은행명 000-0000-0000 예금주 홍길동",
   sheetEndpoint:
     "https://script.google.com/macros/s/AKfycbw97tf6AbG1mbGDxU3fAdPF1QCaaD8dIS3zlX-v8Ykaf3SDw5AK8Z-WetJAMOt4y4lM4A/exec",
 };
-
-const giftSetGuide = [
-  { name: "명품 4KG", composition: "그랑포도 4~6종", price: 165000 },
-  { name: "프리미엄 4KG", composition: "그랑포도 랜덤 3~4종", price: 105000 },
-  { name: "프리미엄 2KG", composition: "그랑포도 랜덤 3~4종", price: 55000 },
-  { name: "베이직 4KG", composition: "그랑포도 랜덤 1~2종", price: 65000 },
-  { name: "베이직 2KG", composition: "그랑포도 랜덤 1~2종", price: 35000 },
-];
 
 const appsScriptCode = `const ORDER_SHEET_NAME = "주문서";
 const ITEM_SHEET_NAME = "주문상품";
@@ -87,6 +75,7 @@ function doPost(e) {
 
     const data = JSON.parse(e.postData.contents);
     const customer = data.customer || {};
+    const phone = String(customer.phone || "");
     const items = Array.isArray(data.items) ? data.items : [];
     const orderedAt = new Date();
     const orderId = Utilities.getUuid();
@@ -104,10 +93,10 @@ function doPost(e) {
     const itemSheet = getItemSheet_(spreadsheet);
 
     // 주문당 한 줄: 기존 주문 요약 시트에 저장합니다.
-    orderSheet.appendRow([
+    const orderRow = [
       orderedAt,
       customer.name || "",
-      customer.phone || "",
+      phone,
       customer.note || "",
       itemSummary,
       totalBoxes,
@@ -115,14 +104,18 @@ function doPost(e) {
       customer.address || "",
       customer.payerName || "",
       orderId
-    ]);
+    ];
+    const orderRowIndex = orderSheet.getLastRow() + 1;
+    const orderRange = orderSheet.getRange(orderRowIndex, 1, 1, ORDER_HEADERS.length);
+    orderRange.getCell(1, 3).setNumberFormat("@");
+    orderRange.setValues([orderRow]);
 
     // 품목당 한 줄: 주문상품 시트에 저장합니다.
     const itemRows = items.map(item => [
       orderId,
       orderedAt,
       customer.name || "",
-      customer.phone || "",
+      phone,
       customer.address || "",
       customer.payerName || "",
       customer.note || "",
@@ -135,8 +128,10 @@ function doPost(e) {
     ]);
 
     if (itemRows.length > 0) {
+      const itemStartRow = itemSheet.getLastRow() + 1;
+      itemSheet.getRange(itemStartRow, 4, itemRows.length, 1).setNumberFormat("@");
       itemSheet
-        .getRange(itemSheet.getLastRow() + 1, 1, itemRows.length, ITEM_HEADERS.length)
+        .getRange(itemStartRow, 1, itemRows.length, ITEM_HEADERS.length)
         .setValues(itemRows);
     }
 
@@ -221,24 +216,13 @@ function decodeSettings(value: string): Settings | null {
     return {
       shopName: parsed.shopName || defaultSettings.shopName,
       introText: parsed.introText || defaultSettings.introText,
-      products: normalizeProducts(parsed.products),
+      products: defaultSettings.products,
       bankNotice: parsed.bankNotice || defaultSettings.bankNotice,
       sheetEndpoint: parsed.sheetEndpoint || defaultSettings.sheetEndpoint,
     };
   } catch {
     return null;
   }
-}
-
-function normalizeProducts(products: Product[] = emptyProducts) {
-  return Array.from({ length: 5 }, (_, index) => {
-    const item = products[index] ?? emptyProducts[index];
-    return {
-      id: item.id || `product-${index + 1}`,
-      name: item.name || "",
-      price: Number(item.price) || 0,
-    };
-  });
 }
 
 function loadSettingsFromUrl() {
@@ -324,24 +308,10 @@ export default function Home() {
     }));
   }
 
-  function updateProduct(index: number, field: "name" | "price", value: string) {
-    setSettings((current) => ({
-      ...current,
-      products: current.products.map((product, productIndex) =>
-        productIndex === index
-          ? {
-              ...product,
-              [field]: field === "price" ? Number(value) || 0 : value,
-            }
-          : product,
-      ),
-    }));
-  }
-
   function saveAdminSettings() {
     const normalized = {
       ...settings,
-      products: normalizeProducts(settings.products),
+      products: defaultSettings.products,
     };
     const encoded = encodeSettings(normalized);
     window.localStorage.setItem("grape-order-settings", encoded);
@@ -686,7 +656,7 @@ export default function Home() {
             <div className="rounded-lg bg-white p-4">
               <h2 className="text-xl font-black">관리자 설정</h2>
               <p className="mt-1 text-sm font-semibold text-[#6d6a55]">
-                상품과 가격을 저장한 뒤 공개 링크를 손님에게 보내세요.
+                상품과 가격은 고정되어 있으며, 안내문과 계좌정보를 저장할 수 있습니다.
               </p>
             </div>
 
@@ -712,28 +682,6 @@ export default function Home() {
                 value={settings.introText}
               />
             </label>
-
-            <section className="grid gap-3">
-              {settings.products.map((product, index) => (
-                <div className="grid gap-2 rounded-lg bg-white p-4" key={product.id}>
-                  <strong>상품 {index + 1}</strong>
-                  <input
-                    className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
-                    onChange={(event) => updateProduct(index, "name", event.target.value)}
-                    placeholder="상품명"
-                    value={product.name}
-                  />
-                  <input
-                    className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
-                    inputMode="numeric"
-                    onChange={(event) => updateProduct(index, "price", event.target.value)}
-                    placeholder="가격"
-                    type="number"
-                    value={product.price || ""}
-                  />
-                </div>
-              ))}
-            </section>
 
             <label className="grid gap-1 text-sm font-bold">
               계좌이체 안내 문구
