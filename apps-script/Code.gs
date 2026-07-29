@@ -26,7 +26,7 @@ function doPost(e) {
     const phone = normalizePhone_(customer.phone);
     const items = Array.isArray(data.items) ? data.items : [];
     const orderedAt = new Date();
-    const orderId = Utilities.getUuid();
+    const orderId = createOrderId_(orderedAt);
     const totalBoxes = Number(data.totalBoxes) || 0;
     const total = Number(data.total) || 0;
     const itemSummary = items
@@ -135,6 +135,13 @@ function ensureHeader_(sheet, headers) {
 function normalizePhone_(value) {
   const phone = String(value || "").trim();
   return phone.replace(/^10(?=[0-9-])/, "010");
+}
+
+function createOrderId_(orderedAt) {
+  const datePart = Utilities.formatDate(orderedAt, Session.getScriptTimeZone(), "yyMMdd");
+  const letter = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+  const number = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
+  return datePart + letter + number;
 }
 
 function json_(data) {
