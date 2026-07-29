@@ -10,6 +10,7 @@ type Product = {
 
 type Settings = {
   shopName: string;
+  introText: string;
   products: Product[];
   bankNotice: string;
   sheetEndpoint: string;
@@ -29,6 +30,16 @@ const emptyProducts: Product[] = Array.from({ length: 5 }, (_, index) => ({
 
 const defaultSettings: Settings = {
   shopName: "그랑포도",
+  introText: `내 가족이 먹는다는 마음으로 깨끗한 자연환경 속에서 한 송이 한 송이 정성껏 키웠습니다.
+무농약 인증, 무비료, 무호르몬 처리로 안심하고 드실 수 있습니다.
+100% 지하 암반수로만 재배한 최고급 프리미엄 유럽포도를 소중한 사람들과 함께 나누세요.
+
+< 구매 안내 >
+입금하신 순서대로 무료배송 해드립니다.
+희귀 품종, 한정 물량이라 조기 소진될 경우, 구매가 불가하니 양해 부탁드립니다.
+
+< 주문 문의 >
+010-5490-7444`,
   products: [
     { id: "product-1", name: "샤인머스캣 1박스", price: 35000 },
     { id: "product-2", name: "캠벨포도 1박스", price: 25000 },
@@ -62,6 +73,7 @@ function decodeSettings(value: string): Settings | null {
     const parsed = JSON.parse(decoded) as Settings;
     return {
       shopName: parsed.shopName || defaultSettings.shopName,
+      introText: parsed.introText || defaultSettings.introText,
       products: normalizeProducts(parsed.products),
       bankNotice: parsed.bankNotice || defaultSettings.bankNotice,
       sheetEndpoint: parsed.sheetEndpoint || defaultSettings.sheetEndpoint,
@@ -310,6 +322,15 @@ export default function Home() {
 
         {mode === "order" ? (
           <form className="flex flex-1 flex-col gap-4" onSubmit={submitOrder}>
+            {settings.introText.trim() ? (
+              <section className="rounded-lg border border-[#d6ccb6] bg-[#fffaf0] p-4">
+                <h2 className="text-base font-black text-[#426b2f]">그랑포도 안내</h2>
+                <p className="mt-3 whitespace-pre-line text-sm font-medium leading-6 text-[#4d4939]">
+                  {settings.introText}
+                </p>
+              </section>
+            ) : null}
+
             <section className="grid gap-3">
               {activeProducts.map((product) => {
                 const quantity = quantities[product.id] || 0;
@@ -459,6 +480,18 @@ export default function Home() {
                   setSettings((current) => ({ ...current, shopName: event.target.value }))
                 }
                 value={settings.shopName}
+              />
+            </label>
+
+            <label className="grid gap-1 text-sm font-bold">
+              페이지 상단 설명문
+              <textarea
+                className="min-h-64 rounded-md border border-[#d8cfba] px-3 py-3 text-base leading-6"
+                onChange={(event) =>
+                  setSettings((current) => ({ ...current, introText: event.target.value }))
+                }
+                placeholder="상품과 구매 안내를 입력해 주세요."
+                value={settings.introText}
               />
             </label>
 
