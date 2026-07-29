@@ -312,7 +312,11 @@ export default function Home() {
             <h1 className="text-3xl font-black tracking-normal">{settings.shopName}</h1>
           </div>
           <button
-            className="rounded-full border border-[#d6ccb6] bg-white px-3 py-2 text-sm font-bold"
+            className={
+              mode === "order"
+                ? "px-1.5 py-1 text-xs font-medium text-[#aaa491] underline-offset-2 hover:text-[#6d6a55] hover:underline"
+                : "rounded-full border border-[#d6ccb6] bg-white px-3 py-2 text-sm font-bold"
+            }
             onClick={handleModeButton}
             type="button"
           >
