@@ -19,6 +19,8 @@ type Settings = {
 type Customer = {
   name: string;
   phone: string;
+  address: string;
+  payerName: string;
   note: string;
 };
 
@@ -51,6 +53,151 @@ const defaultSettings: Settings = {
   sheetEndpoint:
     "https://script.google.com/macros/s/AKfycbw97tf6AbG1mbGDxU3fAdPF1QCaaD8dIS3zlX-v8Ykaf3SDw5AK8Z-WetJAMOt4y4lM4A/exec",
 };
+
+const giftSetGuide = [
+  { name: "명품 4KG", composition: "그랑포도 4~6종", price: 165000 },
+  { name: "프리미엄 4KG", composition: "그랑포도 랜덤 3~4종", price: 105000 },
+  { name: "프리미엄 2KG", composition: "그랑포도 랜덤 3~4종", price: 55000 },
+  { name: "베이직 4KG", composition: "그랑포도 랜덤 1~2종", price: 65000 },
+  { name: "베이직 2KG", composition: "그랑포도 랜덤 1~2종", price: 35000 },
+];
+
+const appsScriptCode = `const ORDER_SHEET_NAME = "주문서";
+const ITEM_SHEET_NAME = "주문상품";
+
+const ORDER_HEADERS = [
+  "주문일시", "주문자명", "전화번호", "요청사항", "주문상품",
+  "총 박스", "총 금액", "받으실 주소", "입금자명", "주문번호"
+];
+
+const ITEM_HEADERS = [
+  "주문번호", "주문일시", "주문자명", "전화번호", "받으실 주소",
+  "입금자명", "요청사항", "상품명", "단가", "수량(박스)", "소계",
+  "주문 총 박스", "주문 총 금액"
+];
+
+function doPost(e) {
+  const lock = LockService.getScriptLock();
+  let hasLock = false;
+
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      throw new Error("주문 데이터가 없습니다.");
+    }
+
+    const data = JSON.parse(e.postData.contents);
+    const customer = data.customer || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    const orderedAt = new Date();
+    const orderId = Utilities.getUuid();
+    const totalBoxes = Number(data.totalBoxes) || 0;
+    const total = Number(data.total) || 0;
+    const itemSummary = items
+      .map(item => String(item.name || "") + " x " + (Number(item.quantity) || 0) + "박스")
+      .join(", ");
+
+    lock.waitLock(30000);
+    hasLock = true;
+
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const orderSheet = getOrderSheet_(spreadsheet);
+    const itemSheet = getItemSheet_(spreadsheet);
+
+    // 주문당 한 줄: 기존 주문 요약 시트에 저장합니다.
+    orderSheet.appendRow([
+      orderedAt,
+      customer.name || "",
+      customer.phone || "",
+      customer.note || "",
+      itemSummary,
+      totalBoxes,
+      total,
+      customer.address || "",
+      customer.payerName || "",
+      orderId
+    ]);
+
+    // 품목당 한 줄: 주문상품 시트에 저장합니다.
+    const itemRows = items.map(item => [
+      orderId,
+      orderedAt,
+      customer.name || "",
+      customer.phone || "",
+      customer.address || "",
+      customer.payerName || "",
+      customer.note || "",
+      item.name || "",
+      Number(item.price) || 0,
+      Number(item.quantity) || 0,
+      Number(item.subtotal) || 0,
+      totalBoxes,
+      total
+    ]);
+
+    if (itemRows.length > 0) {
+      itemSheet
+        .getRange(itemSheet.getLastRow() + 1, 1, itemRows.length, ITEM_HEADERS.length)
+        .setValues(itemRows);
+    }
+
+    SpreadsheetApp.flush();
+    return json_({ ok: true, orderId: orderId });
+  } catch (error) {
+    return json_({ ok: false, message: String(error) });
+  } finally {
+    if (hasLock) {
+      lock.releaseLock();
+    }
+  }
+}
+
+function getOrderSheet_(spreadsheet) {
+  let sheet = spreadsheet.getSheetByName(ORDER_SHEET_NAME);
+
+  if (!sheet) {
+    // 기존 주문이 있는 첫 번째 시트를 주문서로 계속 사용합니다.
+    sheet = spreadsheet.getSheets().find(candidate =>
+      candidate.getName() !== ITEM_SHEET_NAME
+    ) || spreadsheet.insertSheet(ORDER_SHEET_NAME);
+
+    if (sheet.getName() !== ORDER_SHEET_NAME) {
+      sheet.setName(ORDER_SHEET_NAME);
+    }
+  }
+
+  ensureHeader_(sheet, ORDER_HEADERS);
+  return sheet;
+}
+
+function getItemSheet_(spreadsheet) {
+  const sheet = spreadsheet.getSheetByName(ITEM_SHEET_NAME)
+    || spreadsheet.insertSheet(ITEM_SHEET_NAME);
+
+  ensureHeader_(sheet, ITEM_HEADERS);
+  return sheet;
+}
+
+function ensureHeader_(sheet, headers) {
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+    return;
+  }
+
+  const firstCell = String(sheet.getRange(1, 1).getDisplayValue()).trim();
+  if (firstCell !== headers[0]) {
+    // 이전 스크립트가 제목 없이 저장한 주문 데이터는 그대로 보존합니다.
+    sheet.insertRowBefore(1);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+  }
+}
+
+function json_(data) {
+  return ContentService
+    .createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
 
 const won = new Intl.NumberFormat("ko-KR");
 
@@ -119,6 +266,8 @@ export default function Home() {
   const [customer, setCustomer] = useState<Customer>({
     name: "",
     phone: "",
+    address: "",
+    payerName: "",
     note: "",
   });
   const [mode, setMode] = useState<"order" | "admin">("order");
@@ -236,7 +385,8 @@ export default function Home() {
   async function copyBankNotice() {
     try {
       const bankInfo = getCopyableBankInfo(settings.bankNotice);
-      await navigator.clipboard.writeText(bankInfo || settings.bankNotice);
+      const copyText = `${bankInfo || settings.bankNotice}\n입금 금액: ${toCurrency(total)}`;
+      await navigator.clipboard.writeText(copyText);
       setToast("복사되었습니다");
     } catch {
       setToast("복사에 실패했습니다");
@@ -252,8 +402,8 @@ export default function Home() {
     setStatus("");
     setIsSubmitting(true);
 
-    if (!customer.name.trim() || !customer.phone.trim()) {
-      setStatus("이름과 전화번호를 입력해 주세요.");
+    if (!customer.name.trim() || !customer.phone.trim() || !customer.payerName.trim()) {
+      setStatus("이름, 전화번호, 입금자명을 입력해 주세요.");
       setIsSubmitting(false);
       return;
     }
@@ -291,7 +441,7 @@ export default function Home() {
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(payload),
       });
-      setCustomer({ name: "", phone: "", note: "" });
+      setCustomer({ name: "", phone: "", address: "", payerName: "", note: "" });
       setQuantities(
         Object.fromEntries(settings.products.map((product) => [product.id, 0])),
       );
@@ -308,7 +458,7 @@ export default function Home() {
       <section className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 py-5">
         <header className="flex items-center justify-between pb-4">
           <div>
-            <p className="text-sm font-semibold text-[#6d6a55]">1박스 단위 주문</p>
+            <p className="text-sm font-semibold text-[#6d6a55]">최고급 프리미엄 유럽 포도 선물세트</p>
             <h1 className="text-3xl font-black tracking-normal">{settings.shopName}</h1>
           </div>
           <button
@@ -334,6 +484,39 @@ export default function Home() {
                 </p>
               </section>
             ) : null}
+
+            <section className="overflow-hidden rounded-lg border border-[#e1d7bd] bg-white">
+              <h2 className="bg-[#8e294c] px-4 py-3 text-lg font-black text-white">
+                그랑포도 선물 세트
+              </h2>
+              <table className="w-full table-fixed border-collapse text-left">
+                <colgroup>
+                  <col className="w-[30%]" />
+                  <col className="w-[43%]" />
+                  <col className="w-[27%]" />
+                </colgroup>
+                <thead className="bg-[#fffaf0] text-sm font-black text-[#9a6c25]">
+                  <tr>
+                    <th className="px-3 py-3">상품명</th>
+                    <th className="border-l border-[#eee5d0] px-3 py-3">상품 구성</th>
+                    <th className="border-l border-[#eee5d0] px-3 py-3 text-right">가격</th>
+                  </tr>
+                </thead>
+                <tbody className="text-sm font-semibold text-[#28251f]">
+                  {giftSetGuide.map((giftSet) => (
+                    <tr className="border-t border-[#eee9df]" key={giftSet.name}>
+                      <td className="px-3 py-3">{giftSet.name}</td>
+                      <td className="border-l border-[#f0ebe1] px-3 py-3 leading-5">
+                        {giftSet.composition}
+                      </td>
+                      <td className="border-l border-[#f0ebe1] px-3 py-3 text-right whitespace-nowrap">
+                        {toCurrency(giftSet.price)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
 
             <section className="grid gap-3">
               {activeProducts.map((product) => {
@@ -404,6 +587,7 @@ export default function Home() {
               <label className="grid gap-1 text-sm font-bold">
                 이름
                 <input
+                  autoComplete="street-address"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
                   disabled={isSubmitting}
                   onChange={(event) =>
@@ -427,6 +611,31 @@ export default function Home() {
                 />
               </label>
               <label className="grid gap-1 text-sm font-bold">
+                받으실 주소 <span className="font-medium text-[#6d6a55]">(선택)</span>
+                <input
+                  className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                  disabled={isSubmitting}
+                  onChange={(event) =>
+                    setCustomer((current) => ({ ...current, address: event.target.value }))
+                  }
+                  placeholder="주소를 입력해 주세요"
+                  value={customer.address}
+                />
+              </label>
+              <label className="grid gap-1 text-sm font-bold">
+                입금자명 <span className="font-medium text-[#6d6a55]">(필수)</span>
+                <input
+                  autoComplete="name"
+                  className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                  disabled={isSubmitting}
+                  onChange={(event) =>
+                    setCustomer((current) => ({ ...current, payerName: event.target.value }))
+                  }
+                  placeholder="입금하실 분의 이름"
+                  value={customer.payerName}
+                />
+              </label>
+              <label className="grid gap-1 text-sm font-bold">
                 요청사항
                 <textarea
                   className="min-h-24 rounded-md border border-[#d8cfba] px-3 py-3 text-base"
@@ -434,7 +643,7 @@ export default function Home() {
                   onChange={(event) =>
                     setCustomer((current) => ({ ...current, note: event.target.value }))
                   }
-                  placeholder="배송 요청, 선물 포장 등"
+                  placeholder="기타 요청사항이 있으면 적어주세요. 예시) 포도농장에 와서 직접 받겠습니다."
                   value={customer.note}
                 />
               </label>
@@ -442,13 +651,18 @@ export default function Home() {
 
             <section className="rounded-lg border border-[#d6ccb6] bg-[#fffaf0] p-4">
               <div className="flex items-start justify-between gap-3">
-                <p className="text-sm font-semibold leading-6">{settings.bankNotice}</p>
+                <div className="grid gap-2">
+                  <p className="text-sm font-semibold leading-6">{settings.bankNotice}</p>
+                  <p className="text-sm text-[#6b5f45]">
+                    입금 금액 <strong className="ml-2 text-base text-[#202016]">{toCurrency(total)}</strong>
+                  </p>
+                </div>
                 <button
                   className="shrink-0 rounded-md bg-white px-3 py-2 text-sm font-black text-[#426b2f] shadow-sm"
                   onClick={copyBankNotice}
                   type="button"
                 >
-                  복사
+                  계좌·금액 복사
                 </button>
               </div>
             </section>
@@ -572,31 +786,11 @@ export default function Home() {
             <details className="rounded-lg border border-[#d6ccb6] bg-[#fffaf0] p-4 text-sm leading-6">
               <summary className="cursor-pointer font-black">구글시트 연결 코드</summary>
               <p className="mt-3">
-                구글시트에서 확장 프로그램, Apps Script를 열고 아래 코드를 붙여 넣은 뒤
-                웹앱으로 배포하세요.
+                기존 코드를 아래 전체 코드로 교체하면 주문서와 주문상품 시트에 동시에
+                저장됩니다. 저장한 뒤 웹앱 배포를 새 버전으로 업데이트하세요.
               </p>
               <pre className="mt-3 overflow-auto rounded-md bg-[#202016] p-3 text-xs text-white">
-                {`function doPost(e) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const data = JSON.parse(e.postData.contents);
-  const items = data.items.map(item =>
-    item.name + " x " + item.quantity + "박스"
-  ).join(", ");
-
-  sheet.appendRow([
-    new Date(),
-    data.customer.name,
-    data.customer.phone,
-    data.customer.note,
-    items,
-    data.totalBoxes,
-    data.total
-  ]);
-
-  return ContentService
-    .createTextOutput(JSON.stringify({ ok: true }))
-    .setMimeType(ContentService.MimeType.JSON);
-}`}
+                {appsScriptCode}
               </pre>
             </details>
 
