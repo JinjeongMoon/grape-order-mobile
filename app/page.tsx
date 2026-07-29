@@ -558,7 +558,9 @@ export default function Home() {
 
             <section className="grid gap-3 rounded-lg bg-white p-4">
               <label className="grid gap-1 text-sm font-bold">
-                이름 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
+                <span className="flex items-center gap-1">
+                  이름 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
+                </span>
                 <input
                   autoComplete="name"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
@@ -571,7 +573,9 @@ export default function Home() {
                 />
               </label>
               <label className="grid gap-1 text-sm font-bold">
-                전화번호 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
+                <span className="flex items-center gap-1">
+                  전화번호 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
+                </span>
                 <input
                   autoComplete="tel"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
@@ -598,7 +602,9 @@ export default function Home() {
                 />
               </label>
               <label className="grid gap-1 text-sm font-bold">
-                입금자명 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
+                <span className="flex items-center gap-1">
+                  입금자명 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
+                </span>
                 <input
                   autoComplete="name"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
