@@ -589,7 +589,7 @@ export default function Home() {
                 />
               </label>
               <label className="grid gap-1 text-sm font-bold">
-                받으실 주소(선택)
+                택배 받으실 주소 (선택)
                 <input
                   autoComplete="street-address"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
