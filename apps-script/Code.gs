@@ -23,7 +23,7 @@ function doPost(e) {
 
     const data = JSON.parse(e.postData.contents);
     const customer = data.customer || {};
-    const phone = String(customer.phone || "");
+    const phone = normalizePhone_(customer.phone);
     const items = Array.isArray(data.items) ? data.items : [];
     const orderedAt = new Date();
     const orderId = Utilities.getUuid();
@@ -54,8 +54,8 @@ function doPost(e) {
     ];
     const orderRowIndex = orderSheet.getLastRow() + 1;
     const orderRange = orderSheet.getRange(orderRowIndex, 1, 1, ORDER_HEADERS.length);
-    orderRange.getCell(1, 3).setNumberFormat("@");
     orderRange.setValues([orderRow]);
+    orderRange.getCell(1, 3).setNumberFormat("@").setValue(phone);
 
     const itemRows = items.map(item => [
       orderId,
@@ -75,10 +75,10 @@ function doPost(e) {
 
     if (itemRows.length > 0) {
       const itemStartRow = itemSheet.getLastRow() + 1;
-      itemSheet.getRange(itemStartRow, 4, itemRows.length, 1).setNumberFormat("@");
-      itemSheet
-        .getRange(itemStartRow, 1, itemRows.length, ITEM_HEADERS.length)
-        .setValues(itemRows);
+      const itemRange = itemSheet.getRange(itemStartRow, 1, itemRows.length, ITEM_HEADERS.length);
+      const phoneRange = itemSheet.getRange(itemStartRow, 4, itemRows.length, 1);
+      itemRange.setValues(itemRows);
+      phoneRange.setNumberFormat("@").setValues(itemRows.map(() => [phone]));
     }
 
     SpreadsheetApp.flush();
@@ -130,6 +130,11 @@ function ensureHeader_(sheet, headers) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
   }
+}
+
+function normalizePhone_(value) {
+  const phone = String(value || "").trim();
+  return phone.replace(/^10(?=[0-9-])/, "010");
 }
 
 function json_(data) {
