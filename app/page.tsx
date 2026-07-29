@@ -558,9 +558,9 @@ export default function Home() {
 
             <section className="grid gap-3 rounded-lg bg-white p-4">
               <label className="grid gap-1 text-sm font-bold">
-                이름
+                이름 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
                 <input
-                  autoComplete="street-address"
+                  autoComplete="name"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
                   disabled={isSubmitting}
                   onChange={(event) =>
@@ -571,8 +571,9 @@ export default function Home() {
                 />
               </label>
               <label className="grid gap-1 text-sm font-bold">
-                전화번호
+                전화번호 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
                 <input
+                  autoComplete="tel"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
                   disabled={isSubmitting}
                   inputMode="tel"
@@ -584,8 +585,9 @@ export default function Home() {
                 />
               </label>
               <label className="grid gap-1 text-sm font-bold">
-                받으실 주소 <span className="font-medium text-[#6d6a55]">(선택)</span>
+                받으실 주소(선택)
                 <input
+                  autoComplete="street-address"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
                   disabled={isSubmitting}
                   onChange={(event) =>
@@ -596,7 +598,7 @@ export default function Home() {
                 />
               </label>
               <label className="grid gap-1 text-sm font-bold">
-                입금자명 <span className="font-medium text-[#6d6a55]">(필수)</span>
+                입금자명 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
                 <input
                   autoComplete="name"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
