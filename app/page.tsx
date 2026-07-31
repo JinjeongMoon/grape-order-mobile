@@ -442,10 +442,17 @@ export default function Home() {
     <main className="min-h-screen bg-[#f6f3eb] text-[#202016]">
       <section className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 py-5">
         <header className="flex items-center justify-between pb-4">
-          <div>
-            <p className="text-sm font-semibold text-[#6d6a55]">최고급 프리미엄 유럽 포도 선물세트</p>
+        <div>
+          <p className="text-sm font-semibold text-[#6d6a55]">최고급 프리미엄 유럽 포도 선물세트</p>
+          <div className="mt-1 flex items-center gap-2">
+            <img
+              alt=""
+              className="h-10 w-20 shrink-0 object-contain"
+              src={`${import.meta.env.BASE_URL}logo.png`}
+            />
             <h1 className="text-3xl font-black tracking-normal">{settings.shopName}</h1>
           </div>
+        </div>
           <button
             className={
               mode === "order"
