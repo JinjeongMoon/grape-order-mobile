@@ -1,5 +1,6 @@
 const ORDER_SHEET_NAME = "주문서";
 const ITEM_SHEET_NAME = "주문상품";
+const SETTINGS_PROPERTY_KEY = "GRAPE_ORDER_SETTINGS";
 
 const ORDER_HEADERS = [
   "주문일시", "주문자명", "전화번호", "요청사항", "주문상품",
@@ -12,6 +13,16 @@ const ITEM_HEADERS = [
   "주문 총 박스", "주문 총 금액"
 ];
 
+function doGet(e) {
+  const action = String((e && e.parameter && e.parameter.action) || "");
+
+  if (action === "settings") {
+    return jsonp_(getPublicSettings_(), e && e.parameter && e.parameter.callback);
+  }
+
+  return jsonp_({ ok: false, message: "알 수 없는 요청입니다." }, e && e.parameter && e.parameter.callback);
+}
+
 function doPost(e) {
   const lock = LockService.getScriptLock();
   let hasLock = false;
@@ -22,9 +33,31 @@ function doPost(e) {
     }
 
     const data = JSON.parse(e.postData.contents);
+    const action = String((e.parameter && e.parameter.action) || data.action || "order");
+
+    if (action === "settings") {
+      saveSettings_(data);
+      return json_({ ok: true });
+    }
+
+    if (action !== "order") {
+      throw new Error("알 수 없는 요청입니다.");
+    }
+
     const customer = data.customer || {};
     const phone = normalizePhone_(customer.phone);
     const items = Array.isArray(data.items) ? data.items : [];
+    const storedSettings = getStoredSettings_();
+    const soldOutProductIds = new Set(storedSettings.soldOutProductIds);
+    const soldOutItems = items.filter(item => soldOutProductIds.has(String(item.id || "")));
+
+    if (soldOutItems.length > 0) {
+      throw new Error(
+        "품절된 상품이 포함되어 있습니다: " +
+        soldOutItems.map(item => String(item.name || item.id || "")).join(", ")
+      );
+    }
+
     const orderedAt = new Date();
     const orderId = createOrderId_(orderedAt);
     const totalBoxes = Number(data.totalBoxes) || 0;
@@ -92,6 +125,51 @@ function doPost(e) {
   }
 }
 
+function getStoredSettings_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(SETTINGS_PROPERTY_KEY);
+
+  if (!raw) {
+    return { soldOutProductIds: [], updatedAt: "" };
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const soldOutProductIds = Array.isArray(parsed.soldOutProductIds)
+      ? parsed.soldOutProductIds.map(String)
+      : [];
+
+    return {
+      soldOutProductIds: soldOutProductIds,
+      updatedAt: String(parsed.updatedAt || "")
+    };
+  } catch (error) {
+    return { soldOutProductIds: [], updatedAt: "" };
+  }
+}
+
+function getPublicSettings_() {
+  const settings = getStoredSettings_();
+  return {
+    ok: true,
+    soldOutProductIds: settings.soldOutProductIds,
+    updatedAt: settings.updatedAt
+  };
+}
+
+function saveSettings_(data) {
+  const soldOutProductIds = Array.isArray(data.soldOutProductIds)
+    ? data.soldOutProductIds.map(String)
+    : [];
+
+  PropertiesService.getScriptProperties().setProperty(
+    SETTINGS_PROPERTY_KEY,
+    JSON.stringify({
+      soldOutProductIds: soldOutProductIds,
+      updatedAt: new Date().toISOString()
+    })
+  );
+}
+
 function getOrderSheet_(spreadsheet) {
   let sheet = spreadsheet.getSheetByName(ORDER_SHEET_NAME);
 
@@ -148,4 +226,17 @@ function json_(data) {
   return ContentService
     .createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+function jsonp_(data, callback) {
+  const callbackName = String(callback || "").trim();
+  const payload = JSON.stringify(data);
+
+  if (/^[A-Za-z_$][0-9A-Za-z_$]*(\.[A-Za-z_$][0-9A-Za-z_$]*)*$/.test(callbackName)) {
+    return ContentService
+      .createTextOutput(callbackName + "(" + payload + ");")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
+  return json_(data);
 }

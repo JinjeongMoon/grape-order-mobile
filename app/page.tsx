@@ -6,6 +6,7 @@ type Product = {
   id: string;
   name: string;
   price: number;
+  soldOut: boolean;
 };
 
 type Settings = {
@@ -46,7 +47,7 @@ const defaultSettings: Settings = {
 
 < 주문 문의 >
 010-5490-7444`,
-  products: giftSetGuide.map(({ id, name, price }) => ({ id, name, price })),
+  products: giftSetGuide.map(({ id, name, price }) => ({ id, name, price, soldOut: false })),
   bankNotice: fixedBankNotice,
   sheetEndpoint:
     "https://script.google.com/macros/s/AKfycbw97tf6AbG1mbGDxU3fAdPF1QCaaD8dIS3zlX-v8Ykaf3SDw5AK8Z-WetJAMOt4y4lM4A/exec",
@@ -54,6 +55,7 @@ const defaultSettings: Settings = {
 
 const appsScriptCode = `const ORDER_SHEET_NAME = "주문서";
 const ITEM_SHEET_NAME = "주문상품";
+const SETTINGS_PROPERTY_KEY = "GRAPE_ORDER_SETTINGS";
 
 const ORDER_HEADERS = [
   "주문일시", "주문자명", "전화번호", "요청사항", "주문상품",
@@ -66,6 +68,16 @@ const ITEM_HEADERS = [
   "주문 총 박스", "주문 총 금액"
 ];
 
+function doGet(e) {
+  const action = String((e && e.parameter && e.parameter.action) || "");
+
+  if (action === "settings") {
+    return jsonp_(getPublicSettings_(), e && e.parameter && e.parameter.callback);
+  }
+
+  return jsonp_({ ok: false, message: "알 수 없는 요청입니다." }, e && e.parameter && e.parameter.callback);
+}
+
 function doPost(e) {
   const lock = LockService.getScriptLock();
   let hasLock = false;
@@ -76,9 +88,31 @@ function doPost(e) {
     }
 
     const data = JSON.parse(e.postData.contents);
+    const action = String((e.parameter && e.parameter.action) || data.action || "order");
+
+    if (action === "settings") {
+      saveSettings_(data);
+      return json_({ ok: true });
+    }
+
+    if (action !== "order") {
+      throw new Error("알 수 없는 요청입니다.");
+    }
+
     const customer = data.customer || {};
     const phone = normalizePhone_(customer.phone);
     const items = Array.isArray(data.items) ? data.items : [];
+    const storedSettings = getStoredSettings_();
+    const soldOutProductIds = new Set(storedSettings.soldOutProductIds);
+    const soldOutItems = items.filter(item => soldOutProductIds.has(String(item.id || "")));
+
+    if (soldOutItems.length > 0) {
+      throw new Error(
+        "품절된 상품이 포함되어 있습니다: " +
+        soldOutItems.map(item => String(item.name || item.id || "")).join(", ")
+      );
+    }
+
     const orderedAt = new Date();
     const orderId = createOrderId_(orderedAt);
     const totalBoxes = Number(data.totalBoxes) || 0;
@@ -148,6 +182,51 @@ function doPost(e) {
   }
 }
 
+function getStoredSettings_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(SETTINGS_PROPERTY_KEY);
+
+  if (!raw) {
+    return { soldOutProductIds: [], updatedAt: "" };
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const soldOutProductIds = Array.isArray(parsed.soldOutProductIds)
+      ? parsed.soldOutProductIds.map(String)
+      : [];
+
+    return {
+      soldOutProductIds: soldOutProductIds,
+      updatedAt: String(parsed.updatedAt || "")
+    };
+  } catch (error) {
+    return { soldOutProductIds: [], updatedAt: "" };
+  }
+}
+
+function getPublicSettings_() {
+  const settings = getStoredSettings_();
+  return {
+    ok: true,
+    soldOutProductIds: settings.soldOutProductIds,
+    updatedAt: settings.updatedAt
+  };
+}
+
+function saveSettings_(data) {
+  const soldOutProductIds = Array.isArray(data.soldOutProductIds)
+    ? data.soldOutProductIds.map(String)
+    : [];
+
+  PropertiesService.getScriptProperties().setProperty(
+    SETTINGS_PROPERTY_KEY,
+    JSON.stringify({
+      soldOutProductIds: soldOutProductIds,
+      updatedAt: new Date().toISOString()
+    })
+  );
+}
+
 function getOrderSheet_(spreadsheet) {
   let sheet = spreadsheet.getSheetByName(ORDER_SHEET_NAME);
 
@@ -206,6 +285,19 @@ function json_(data) {
   return ContentService
     .createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+function jsonp_(data, callback) {
+  const callbackName = String(callback || "").trim();
+  const payload = JSON.stringify(data);
+
+  if (/^[A-Za-z_$][0-9A-Za-z_$]*(\\.[A-Za-z_$][0-9A-Za-z_$]*)*$/.test(callbackName)) {
+    return ContentService
+      .createTextOutput(callbackName + "(" + payload + ");")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
+  return json_(data);
 }`;
 
 const won = new Intl.NumberFormat("ko-KR");
@@ -223,6 +315,16 @@ function encodeSettings(settings: Settings) {
   return btoa(unescape(encodeURIComponent(compact)));
 }
 
+function mergeProductsWithSavedState(savedProducts: Product[] | undefined) {
+  return defaultSettings.products.map((product) => {
+    const saved = savedProducts?.find((candidate) => candidate.id === product.id);
+    return {
+      ...product,
+      soldOut: Boolean(saved?.soldOut),
+    };
+  });
+}
+
 function decodeSettings(value: string): Settings | null {
   try {
     const decoded = decodeURIComponent(escape(atob(value)));
@@ -230,7 +332,7 @@ function decodeSettings(value: string): Settings | null {
     return {
       shopName: parsed.shopName || defaultSettings.shopName,
       introText: parsed.introText || defaultSettings.introText,
-      products: defaultSettings.products,
+      products: mergeProductsWithSavedState(parsed.products),
       bankNotice: fixedBankNotice,
       sheetEndpoint: parsed.sheetEndpoint || defaultSettings.sheetEndpoint,
     };
@@ -258,6 +360,71 @@ function loadSettingsFromUrl() {
   return decodeSettings(saved) ?? defaultSettings;
 }
 
+type RemoteSettings = {
+  ok?: boolean;
+  soldOutProductIds?: string[];
+};
+
+function applySoldOutProductIds(settings: Settings, soldOutProductIds: string[]) {
+  const soldOutSet = new Set(soldOutProductIds);
+  return {
+    ...settings,
+    products: settings.products.map((product) => ({
+      ...product,
+      soldOut: soldOutSet.has(product.id),
+    })),
+  };
+}
+
+function getSoldOutProductIds(settings: Settings) {
+  return settings.products
+    .filter((product) => product.soldOut)
+    .map((product) => product.id);
+}
+
+function loadRemoteSettings(sheetEndpoint: string) {
+  if (typeof window === "undefined" || !sheetEndpoint.trim()) {
+    return Promise.resolve(null);
+  }
+
+  return new Promise<RemoteSettings | null>((resolve) => {
+    const callbackName = `__grapeOrderSettings_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2)}`;
+    const callbacks = window as typeof window & Record<string, (data: RemoteSettings) => void>;
+    const script = document.createElement("script");
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      script.remove();
+      delete callbacks[callbackName];
+    };
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, 5000);
+
+    callbacks[callbackName] = (data: RemoteSettings) => {
+      cleanup();
+      resolve(data);
+    };
+
+    try {
+      const url = new URL(sheetEndpoint);
+      url.searchParams.set("action", "settings");
+      url.searchParams.set("callback", callbackName);
+      script.src = url.toString();
+      script.onerror = () => {
+        cleanup();
+        resolve(null);
+      };
+      document.body.appendChild(script);
+    } catch {
+      cleanup();
+      resolve(null);
+    }
+  });
+}
+
 export default function Home() {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -279,11 +446,26 @@ export default function Home() {
   const [passwordError, setPasswordError] = useState("");
 
   useEffect(() => {
+    let isMounted = true;
     const next = loadSettingsFromUrl();
     setSettings(next);
     setQuantities(
       Object.fromEntries(next.products.map((product) => [product.id, 0])),
     );
+
+    loadRemoteSettings(next.sheetEndpoint).then((remoteSettings) => {
+      if (!isMounted || !remoteSettings?.soldOutProductIds) {
+        return;
+      }
+
+      setSettings((current) =>
+        applySoldOutProductIds(current, remoteSettings.soldOutProductIds || []),
+      );
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -300,9 +482,21 @@ export default function Home() {
     [settings.products],
   );
 
+  const productGuide = useMemo(
+    () =>
+      giftSetGuide.map((giftSet) => ({
+        ...giftSet,
+        soldOut: Boolean(
+          settings.products.find((product) => product.id === giftSet.id)?.soldOut,
+        ),
+      })),
+    [settings.products],
+  );
+
   const cart = useMemo(
     () =>
       activeProducts
+        .filter((product) => !product.soldOut)
         .map((product) => ({
           ...product,
           quantity: quantities[product.id] || 0,
@@ -315,17 +509,70 @@ export default function Home() {
   const total = cart.reduce((sum, item) => sum + item.subtotal, 0);
   const totalBoxes = cart.reduce((sum, item) => sum + item.quantity, 0);
 
+  useEffect(() => {
+    setQuantities((current) => {
+      let hasChanges = false;
+      const next = { ...current };
+
+      for (const product of settings.products) {
+        if (product.soldOut && next[product.id]) {
+          next[product.id] = 0;
+          hasChanges = true;
+        }
+      }
+
+      return hasChanges ? next : current;
+    });
+  }, [settings.products]);
+
   function updateQuantity(productId: string, amount: number) {
+    const product = settings.products.find((candidate) => candidate.id === productId);
+
+    if (amount > 0 && product?.soldOut) {
+      setStatus("품절된 상품은 주문할 수 없습니다.");
+      return;
+    }
+
     setQuantities((current) => ({
       ...current,
       [productId]: Math.max(0, (current[productId] || 0) + amount),
     }));
   }
 
-  function saveAdminSettings() {
+  function toggleProductSoldOut(productId: string) {
+    setSettings((current) => ({
+      ...current,
+      products: current.products.map((product) =>
+        product.id === productId
+          ? { ...product, soldOut: !product.soldOut }
+          : product,
+      ),
+    }));
+  }
+
+  async function saveRemoteInventorySettings(nextSettings: Settings) {
+    if (!nextSettings.sheetEndpoint.trim()) {
+      return;
+    }
+
+    const url = new URL(nextSettings.sheetEndpoint);
+    url.searchParams.set("action", "settings");
+
+    await fetch(url.toString(), {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "settings",
+        soldOutProductIds: getSoldOutProductIds(nextSettings),
+      }),
+    });
+  }
+
+  async function saveAdminSettings() {
     const normalized = {
       ...settings,
-      products: defaultSettings.products,
+      products: mergeProductsWithSavedState(settings.products),
       bankNotice: fixedBankNotice,
     };
     const encoded = encodeSettings(normalized);
@@ -334,7 +581,13 @@ export default function Home() {
     const url = new URL(window.location.href);
     url.searchParams.set("config", encoded);
     setShareLink(url.toString());
-    setStatus("설정이 저장됐어요. 아래 공개 링크를 손님에게 보내면 됩니다.");
+
+    try {
+      await saveRemoteInventorySettings(normalized);
+      setStatus("설정과 품절 상태가 저장됐어요. 기존 주문서 링크에도 최신 품절 상태가 반영됩니다.");
+    } catch {
+      setStatus("이 기기에는 저장됐지만, 중앙 품절 상태 저장은 실패했어요. Apps Script 주소를 확인해 주세요.");
+    }
   }
 
   function handleModeButton() {
@@ -395,6 +648,16 @@ export default function Home() {
 
     if (cart.length === 0) {
       setStatus("상품을 1박스 이상 담아 주세요.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const selectedSoldOutProduct = activeProducts.find(
+      (product) => product.soldOut && (quantities[product.id] || 0) > 0,
+    );
+
+    if (selectedSoldOutProduct) {
+      setStatus(`${selectedSoldOutProduct.name}은 품절되어 주문할 수 없습니다.`);
       setIsSubmitting(false);
       return;
     }
@@ -495,9 +758,16 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody className="text-sm font-semibold text-[#28251f]">
-                  {giftSetGuide.map((giftSet) => (
+                  {productGuide.map((giftSet) => (
                     <tr className="border-t border-[#eee9df]" key={giftSet.name}>
-                      <td className="px-3 py-3">{giftSet.name}</td>
+                      <td className="px-3 py-3">
+                        <span>{giftSet.name}</span>
+                        {giftSet.soldOut ? (
+                          <span className="mt-1 inline-flex rounded-full bg-[#b33a2b] px-2 py-0.5 text-xs font-black text-white">
+                            품절
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="border-l border-[#f0ebe1] px-3 py-3 leading-5">
                         {giftSet.composition}
                       </td>
@@ -513,13 +783,25 @@ export default function Home() {
             <section className="grid gap-3">
               {activeProducts.map((product) => {
                 const quantity = quantities[product.id] || 0;
+                const isSoldOut = product.soldOut;
                 return (
                   <article
-                    className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-[#e1d7bd] bg-white p-4 shadow-sm"
+                    className={
+                      isSoldOut
+                        ? "grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-[#e3b6ad] bg-[#fff7f5] p-4 shadow-sm"
+                        : "grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-[#e1d7bd] bg-white p-4 shadow-sm"
+                    }
                     key={product.id}
                   >
                     <div>
-                      <h2 className="text-lg font-extrabold">{product.name}</h2>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-lg font-extrabold">{product.name}</h2>
+                        {isSoldOut ? (
+                          <span className="rounded-full bg-[#b33a2b] px-2.5 py-1 text-xs font-black text-white">
+                            품절
+                          </span>
+                        ) : null}
+                      </div>
                       <p className="mt-1 text-sm font-semibold text-[#6b5f45]">
                         {toCurrency(product.price)} / 1박스
                       </p>
@@ -528,7 +810,7 @@ export default function Home() {
                       <button
                         aria-label={`${product.name} 수량 빼기`}
                         className="h-9 w-9 rounded-full border border-[#cabf9e] text-xl font-bold disabled:opacity-40"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || quantity === 0}
                         onClick={() => updateQuantity(product.id, -1)}
                         type="button"
                       >
@@ -537,8 +819,8 @@ export default function Home() {
                       <span className="w-8 text-center text-lg font-black">{quantity}</span>
                       <button
                         aria-label={`${product.name} 수량 더하기`}
-                        className="h-9 w-9 rounded-full bg-[#426b2f] text-xl font-bold text-white disabled:opacity-40"
-                        disabled={isSubmitting}
+                        className="h-9 w-9 rounded-full bg-[#426b2f] text-xl font-bold text-white disabled:cursor-not-allowed disabled:bg-[#a6a091] disabled:opacity-70"
+                        disabled={isSubmitting || isSoldOut}
                         onClick={() => updateQuantity(product.id, 1)}
                         type="button"
                       >
@@ -609,6 +891,9 @@ export default function Home() {
               </label>
               <label className="grid gap-1 text-sm font-bold">
                 택배 받으실 주소 (선택)
+                <span className="text-xs font-semibold leading-5 text-[#6d6a55]">
+                  선물을 택배로 바로 보내시려면, 받는 분의 주소, 이름, 연락처를 모두 적어주세요.
+                </span>
                 <input
                   autoComplete="street-address"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
@@ -686,9 +971,45 @@ export default function Home() {
             <div className="rounded-lg bg-white p-4">
               <h2 className="text-xl font-black">관리자 설정</h2>
               <p className="mt-1 text-sm font-semibold text-[#6d6a55]">
-                상품과 계좌정보는 고정되어 있으며, 안내문과 시트 주소를 저장할 수 있습니다.
+                상품과 계좌정보는 고정되어 있으며, 안내문과 품절 상태를 저장할 수 있습니다.
               </p>
             </div>
+
+            <section className="grid gap-3 rounded-lg bg-white p-4">
+              <div>
+                <h3 className="text-base font-black">상품 판매 상태</h3>
+                <p className="mt-1 text-sm font-semibold text-[#6d6a55]">
+                  품절로 바꾸면 손님 화면에서 수량 추가가 막힙니다.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                {settings.products.map((product) => (
+                  <label
+                    className="flex items-center justify-between gap-3 rounded-md border border-[#e6ddc9] px-3 py-3"
+                    key={product.id}
+                  >
+                    <span className="font-bold">{product.name}</span>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={
+                          product.soldOut
+                            ? "text-sm font-black text-[#b33a2b]"
+                            : "text-sm font-black text-[#426b2f]"
+                        }
+                      >
+                        {product.soldOut ? "품절" : "판매중"}
+                      </span>
+                      <input
+                        checked={product.soldOut}
+                        className="h-5 w-5 accent-[#b33a2b]"
+                        onChange={() => toggleProductSoldOut(product.id)}
+                        type="checkbox"
+                      />
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </section>
 
             <label className="grid gap-1 text-sm font-bold">
               상점 이름
