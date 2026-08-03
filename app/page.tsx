@@ -539,15 +539,47 @@ export default function Home() {
     }));
   }
 
+  function normalizeSettingsForSave(nextSettings: Settings) {
+    return {
+      ...nextSettings,
+      products: mergeProductsWithSavedState(nextSettings.products),
+      bankNotice: fixedBankNotice,
+    };
+  }
+
+  function persistSettingsInBrowser(nextSettings: Settings) {
+    const normalized = normalizeSettingsForSave(nextSettings);
+    const encoded = encodeSettings(normalized);
+    window.localStorage.setItem("grape-order-settings", encoded);
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("config", encoded);
+    window.history.replaceState(null, "", url.toString());
+    setShareLink(url.toString());
+
+    return normalized;
+  }
+
   function toggleProductSoldOut(productId: string) {
-    setSettings((current) => ({
-      ...current,
-      products: current.products.map((product) =>
+    const nextSettings = {
+      ...settings,
+      products: settings.products.map((product) =>
         product.id === productId
           ? { ...product, soldOut: !product.soldOut }
           : product,
       ),
-    }));
+    };
+
+    setSettings(nextSettings);
+    const normalized = persistSettingsInBrowser(nextSettings);
+
+    saveRemoteInventorySettings(normalized)
+      .then(() => {
+        setStatus("품절 상태가 저장됐어요. 새로고침해도 유지됩니다.");
+      })
+      .catch(() => {
+        setStatus("이 기기에는 저장됐지만, 중앙 품절 상태 저장은 실패했어요. Apps Script 주소를 확인해 주세요.");
+      });
   }
 
   async function saveRemoteInventorySettings(nextSettings: Settings) {
@@ -570,17 +602,7 @@ export default function Home() {
   }
 
   async function saveAdminSettings() {
-    const normalized = {
-      ...settings,
-      products: mergeProductsWithSavedState(settings.products),
-      bankNotice: fixedBankNotice,
-    };
-    const encoded = encodeSettings(normalized);
-    window.localStorage.setItem("grape-order-settings", encoded);
-
-    const url = new URL(window.location.href);
-    url.searchParams.set("config", encoded);
-    setShareLink(url.toString());
+    const normalized = persistSettingsInBrowser(settings);
 
     try {
       await saveRemoteInventorySettings(normalized);
