@@ -26,11 +26,11 @@ type Customer = {
 };
 
 const giftSetGuide = [
-  { id: "product-1", name: "명품 4KG", composition: "그랑포도 4~6종", price: 165000 },
-  { id: "product-2", name: "프리미엄 4KG", composition: "그랑포도 랜덤 3~4종", price: 105000 },
-  { id: "product-3", name: "프리미엄 2KG", composition: "그랑포도 랜덤 3~4종", price: 55000 },
-  { id: "product-4", name: "베이직 4KG", composition: "그랑포도 랜덤 1~2종", price: 65000 },
-  { id: "product-5", name: "베이직 2KG", composition: "그랑포도 랜덤 1~2종", price: 35000 },
+  { id: "product-1", name: "명품 4KG", composition: "유럽포도 4~6종", price: 165000 },
+  { id: "product-2", name: "프리미엄 4KG", composition: "유럽포도 랜덤 3~4종", price: 105000 },
+  { id: "product-3", name: "프리미엄 2KG", composition: "유럽포도 랜덤 3~4종", price: 55000 },
+  { id: "product-4", name: "베이직 4KG", composition: "유럽포도 랜덤 1~2종", price: 65000 },
+  { id: "product-5", name: "베이직 2KG", composition: "유럽포도 랜덤 1~2종", price: 35000 },
 ];
 
 const fixedBankNotice = "계좌이체: 농협 351-1382-8783-43 황의대";
