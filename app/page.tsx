@@ -953,8 +953,8 @@ export default function Home() {
               </label>
               <label className="grid gap-1 text-sm font-bold">
                 택배 받으실 주소 (선택)
-                <span className="text-xs font-semibold leading-5 text-[#6d6a55]">
-                  선물을 택배로 바로 보내시려면, 받는 분의 주소, 이름, 연락처를 모두 적어주세요.
+                <span className="text-sm font-black leading-5 text-[#8e294c]">
+                  선물하실 경우, 받으실 분의 주소, 연락처, 성함을 정확하게 적어 주세요.
                 </span>
                 <input
                   autoComplete="street-address"
@@ -963,7 +963,7 @@ export default function Home() {
                   onChange={(event) =>
                     setCustomer((current) => ({ ...current, address: event.target.value }))
                   }
-                  placeholder="주소를 입력해 주세요"
+                  placeholder="주소, 연락처, 성함을 적어주세요."
                   value={customer.address}
                 />
               </label>
