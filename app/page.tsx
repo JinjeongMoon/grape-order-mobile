@@ -381,16 +381,21 @@ type RemoteSettings = {
   soldOutProductIds?: string[];
 };
 
-function applyRemoteSettings(settings: Settings, remoteSettings: RemoteSettings) {
+function applyRemoteSettings(
+  settings: Settings,
+  remoteSettings: RemoteSettings,
+  options?: { preserveLocalText?: boolean },
+) {
   const soldOutSet = new Set(remoteSettings.soldOutProductIds || []);
+  const preserveLocalText = Boolean(options?.preserveLocalText);
   return {
     ...settings,
     shopName:
-      typeof remoteSettings.shopName === "string" && remoteSettings.shopName.trim()
+      !preserveLocalText && typeof remoteSettings.shopName === "string" && remoteSettings.shopName.trim()
         ? remoteSettings.shopName
         : settings.shopName,
     introText:
-      typeof remoteSettings.introText === "string"
+      !preserveLocalText && typeof remoteSettings.introText === "string"
         ? remoteSettings.introText
         : settings.introText,
     products: settings.products.map((product) => ({
@@ -482,8 +487,11 @@ export default function Home() {
         return;
       }
 
+      const hasSharedConfig = new URL(window.location.href).searchParams.has("config");
       setSettings((current) =>
-        applyRemoteSettings(current, remoteSettings),
+        applyRemoteSettings(current, remoteSettings, {
+          preserveLocalText: hasSharedConfig,
+        }),
       );
     });
 
@@ -582,6 +590,12 @@ export default function Home() {
     setShareLink(url.toString());
 
     return normalized;
+  }
+
+  function updateAdminSettings(nextSettings: Settings) {
+    setSettings(nextSettings);
+    persistSettingsInBrowser(nextSettings);
+    setStatus("설정이 이 기기에 저장됐어요.");
   }
 
   function toggleProductSoldOut(productId: string) {
@@ -1063,9 +1077,9 @@ export default function Home() {
               상점 이름
               <input
                 className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
-                onChange={(event) =>
-                  setSettings((current) => ({ ...current, shopName: event.target.value }))
-                }
+                onChange={(event) => {
+                  updateAdminSettings({ ...settings, shopName: event.target.value });
+                }}
                 value={settings.shopName}
               />
             </label>
@@ -1074,9 +1088,9 @@ export default function Home() {
               페이지 상단 설명문
               <textarea
                 className="min-h-64 rounded-md border border-[#d8cfba] px-3 py-3 text-base leading-6"
-                onChange={(event) =>
-                  setSettings((current) => ({ ...current, introText: event.target.value }))
-                }
+                onChange={(event) => {
+                  updateAdminSettings({ ...settings, introText: event.target.value });
+                }}
                 placeholder="상품과 구매 안내를 입력해 주세요."
                 value={settings.introText}
               />
@@ -1086,12 +1100,12 @@ export default function Home() {
               Google Apps Script 웹앱 URL
               <input
                 className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
+                onChange={(event) => {
+                  updateAdminSettings({
+                    ...settings,
                     sheetEndpoint: event.target.value,
-                  }))
-                }
+                  });
+                }}
                 placeholder="https://script.google.com/macros/s/..."
                 value={settings.sheetEndpoint}
               />
