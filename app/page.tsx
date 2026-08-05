@@ -186,21 +186,25 @@ function getStoredSettings_() {
   const raw = PropertiesService.getScriptProperties().getProperty(SETTINGS_PROPERTY_KEY);
 
   if (!raw) {
-    return { soldOutProductIds: [], updatedAt: "" };
+    return { shopName: null, introText: null, soldOutProductIds: [], updatedAt: "" };
   }
 
   try {
     const parsed = JSON.parse(raw);
+    const hasShopName = Object.prototype.hasOwnProperty.call(parsed, "shopName");
+    const hasIntroText = Object.prototype.hasOwnProperty.call(parsed, "introText");
     const soldOutProductIds = Array.isArray(parsed.soldOutProductIds)
       ? parsed.soldOutProductIds.map(String)
       : [];
 
     return {
+      shopName: hasShopName ? String(parsed.shopName || "") : null,
+      introText: hasIntroText ? String(parsed.introText || "") : null,
       soldOutProductIds: soldOutProductIds,
       updatedAt: String(parsed.updatedAt || "")
     };
   } catch (error) {
-    return { soldOutProductIds: [], updatedAt: "" };
+    return { shopName: null, introText: null, soldOutProductIds: [], updatedAt: "" };
   }
 }
 
@@ -208,6 +212,8 @@ function getPublicSettings_() {
   const settings = getStoredSettings_();
   return {
     ok: true,
+    shopName: settings.shopName,
+    introText: settings.introText,
     soldOutProductIds: settings.soldOutProductIds,
     updatedAt: settings.updatedAt
   };
@@ -221,6 +227,8 @@ function saveSettings_(data) {
   PropertiesService.getScriptProperties().setProperty(
     SETTINGS_PROPERTY_KEY,
     JSON.stringify({
+      shopName: String(data.shopName || ""),
+      introText: String(data.introText || ""),
       soldOutProductIds: soldOutProductIds,
       updatedAt: new Date().toISOString()
     })
@@ -330,8 +338,14 @@ function decodeSettings(value: string): Settings | null {
     const decoded = decodeURIComponent(escape(atob(value)));
     const parsed = JSON.parse(decoded) as Settings;
     return {
-      shopName: parsed.shopName || defaultSettings.shopName,
-      introText: parsed.introText || defaultSettings.introText,
+      shopName:
+        typeof parsed.shopName === "string" && parsed.shopName.trim()
+          ? parsed.shopName
+          : defaultSettings.shopName,
+      introText:
+        typeof parsed.introText === "string"
+          ? parsed.introText
+          : defaultSettings.introText,
       products: mergeProductsWithSavedState(parsed.products),
       bankNotice: fixedBankNotice,
       sheetEndpoint: parsed.sheetEndpoint || defaultSettings.sheetEndpoint,
@@ -362,13 +376,23 @@ function loadSettingsFromUrl() {
 
 type RemoteSettings = {
   ok?: boolean;
+  shopName?: string;
+  introText?: string;
   soldOutProductIds?: string[];
 };
 
-function applySoldOutProductIds(settings: Settings, soldOutProductIds: string[]) {
-  const soldOutSet = new Set(soldOutProductIds);
+function applyRemoteSettings(settings: Settings, remoteSettings: RemoteSettings) {
+  const soldOutSet = new Set(remoteSettings.soldOutProductIds || []);
   return {
     ...settings,
+    shopName:
+      typeof remoteSettings.shopName === "string" && remoteSettings.shopName.trim()
+        ? remoteSettings.shopName
+        : settings.shopName,
+    introText:
+      typeof remoteSettings.introText === "string"
+        ? remoteSettings.introText
+        : settings.introText,
     products: settings.products.map((product) => ({
       ...product,
       soldOut: soldOutSet.has(product.id),
@@ -454,12 +478,12 @@ export default function Home() {
     );
 
     loadRemoteSettings(next.sheetEndpoint).then((remoteSettings) => {
-      if (!isMounted || !remoteSettings?.soldOutProductIds) {
+      if (!isMounted || !remoteSettings?.ok) {
         return;
       }
 
       setSettings((current) =>
-        applySoldOutProductIds(current, remoteSettings.soldOutProductIds || []),
+        applyRemoteSettings(current, remoteSettings),
       );
     });
 
@@ -596,6 +620,8 @@ export default function Home() {
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "settings",
+        shopName: nextSettings.shopName,
+        introText: nextSettings.introText,
         soldOutProductIds: getSoldOutProductIds(nextSettings),
       }),
     });

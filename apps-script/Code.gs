@@ -129,21 +129,25 @@ function getStoredSettings_() {
   const raw = PropertiesService.getScriptProperties().getProperty(SETTINGS_PROPERTY_KEY);
 
   if (!raw) {
-    return { soldOutProductIds: [], updatedAt: "" };
+    return { shopName: null, introText: null, soldOutProductIds: [], updatedAt: "" };
   }
 
   try {
     const parsed = JSON.parse(raw);
+    const hasShopName = Object.prototype.hasOwnProperty.call(parsed, "shopName");
+    const hasIntroText = Object.prototype.hasOwnProperty.call(parsed, "introText");
     const soldOutProductIds = Array.isArray(parsed.soldOutProductIds)
       ? parsed.soldOutProductIds.map(String)
       : [];
 
     return {
+      shopName: hasShopName ? String(parsed.shopName || "") : null,
+      introText: hasIntroText ? String(parsed.introText || "") : null,
       soldOutProductIds: soldOutProductIds,
       updatedAt: String(parsed.updatedAt || "")
     };
   } catch (error) {
-    return { soldOutProductIds: [], updatedAt: "" };
+    return { shopName: null, introText: null, soldOutProductIds: [], updatedAt: "" };
   }
 }
 
@@ -151,6 +155,8 @@ function getPublicSettings_() {
   const settings = getStoredSettings_();
   return {
     ok: true,
+    shopName: settings.shopName,
+    introText: settings.introText,
     soldOutProductIds: settings.soldOutProductIds,
     updatedAt: settings.updatedAt
   };
@@ -164,6 +170,8 @@ function saveSettings_(data) {
   PropertiesService.getScriptProperties().setProperty(
     SETTINGS_PROPERTY_KEY,
     JSON.stringify({
+      shopName: String(data.shopName || ""),
+      introText: String(data.introText || ""),
       soldOutProductIds: soldOutProductIds,
       updatedAt: new Date().toISOString()
     })
