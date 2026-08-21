@@ -58,8 +58,8 @@ const ITEM_SHEET_NAME = "주문상품";
 const SETTINGS_PROPERTY_KEY = "GRAPE_ORDER_SETTINGS";
 
 const ORDER_HEADERS = [
-  "주문일시", "주문자명", "전화번호", "요청사항", "주문상품",
-  "총 박스", "총 금액", "받으실 주소", "입금자명", "주문번호"
+  "주문일시", "이름", "전화번호", "입금자", "주문상품",
+  "요청사항", "주소", "총박스", "총금액", "주문번호"
 ];
 
 const ITEM_HEADERS = [
@@ -133,12 +133,12 @@ function doPost(e) {
       orderedAt,
       customer.name || "",
       phone,
-      customer.note || "",
+      customer.payerName || "",
       itemSummary,
+      customer.note || "",
+      customer.address || "",
       totalBoxes,
       total,
-      customer.address || "",
-      customer.payerName || "",
       orderId
     ];
     const orderRowIndex = orderSheet.getLastRow() + 1;
