@@ -1057,14 +1057,14 @@ export default function Home() {
               </label>
               <label className="grid gap-1 text-sm font-bold">
                 택배 받으실 주소
-                <input
+                <textarea
                   autoComplete="street-address"
-                  className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                  className="min-h-24 rounded-md border border-[#d8cfba] px-3 py-3 text-base"
                   disabled={isSubmitting}
                   onChange={(event) =>
                     setCustomer((current) => ({ ...current, address: event.target.value }))
                   }
-                  placeholder="주소를 적어주세요. *택배가 1건 이상이시면, 따로 따로 주문을 해주세요."
+                  placeholder="*택배가 1건 이상이시면, 따로 따로 주문을 해주세요."
                   value={customer.address}
                 />
               </label>
