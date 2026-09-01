@@ -3,12 +3,14 @@ const ITEM_SHEET_NAME = "주문상품";
 const SETTINGS_PROPERTY_KEY = "GRAPE_ORDER_SETTINGS";
 
 const ORDER_HEADERS = [
-  "주문일시", "이름", "전화번호", "입금자", "주문상품",
-  "요청사항", "주소", "총박스", "총금액", "주문번호"
+  "주문일시", "주문자 이름", "주문자 연락처", "택배 받는 사람 이름",
+  "택배 받는 사람 연락처", "입금자", "주문상품", "요청사항",
+  "택배 받으실 주소", "총박스", "총금액", "주문번호"
 ];
 
 const ITEM_HEADERS = [
-  "주문번호", "주문일시", "주문자명", "전화번호", "받으실 주소",
+  "주문번호", "주문일시", "주문자 이름", "주문자 연락처",
+  "택배 받는 사람 이름", "택배 받는 사람 연락처", "택배 받으실 주소",
   "입금자명", "요청사항", "상품명", "단가", "수량(박스)", "소계",
   "주문 총 박스", "주문 총 금액"
 ];
@@ -46,6 +48,7 @@ function doPost(e) {
 
     const customer = data.customer || {};
     const phone = normalizePhone_(customer.phone);
+    const recipientPhone = normalizePhone_(customer.recipientPhone);
     const items = Array.isArray(data.items) ? data.items : [];
     const storedSettings = getStoredSettings_();
     const soldOutProductIds = new Set(storedSettings.soldOutProductIds);
@@ -77,6 +80,8 @@ function doPost(e) {
       orderedAt,
       customer.name || "",
       phone,
+      customer.recipientName || "",
+      recipientPhone,
       customer.payerName || "",
       itemSummary,
       customer.note || "",
@@ -89,12 +94,15 @@ function doPost(e) {
     const orderRange = orderSheet.getRange(orderRowIndex, 1, 1, ORDER_HEADERS.length);
     orderRange.setValues([orderRow]);
     orderRange.getCell(1, 3).setNumberFormat("@").setValue(phone);
+    orderRange.getCell(1, 5).setNumberFormat("@").setValue(recipientPhone);
 
     const itemRows = items.map(item => [
       orderId,
       orderedAt,
       customer.name || "",
       phone,
+      customer.recipientName || "",
+      recipientPhone,
       customer.address || "",
       customer.payerName || "",
       customer.note || "",
@@ -109,9 +117,11 @@ function doPost(e) {
     if (itemRows.length > 0) {
       const itemStartRow = itemSheet.getLastRow() + 1;
       const itemRange = itemSheet.getRange(itemStartRow, 1, itemRows.length, ITEM_HEADERS.length);
-      const phoneRange = itemSheet.getRange(itemStartRow, 4, itemRows.length, 1);
       itemRange.setValues(itemRows);
-      phoneRange.setNumberFormat("@").setValues(itemRows.map(() => [phone]));
+      itemSheet.getRange(itemStartRow, 4, itemRows.length, 1)
+        .setNumberFormat("@").setValues(itemRows.map(() => [phone]));
+      itemSheet.getRange(itemStartRow, 6, itemRows.length, 1)
+        .setNumberFormat("@").setValues(itemRows.map(() => [recipientPhone]));
     }
 
     SpreadsheetApp.flush();
@@ -215,7 +225,29 @@ function ensureHeader_(sheet, headers) {
     sheet.insertRowBefore(1);
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
+    return;
   }
+
+  const currentHeaders = sheet
+    .getRange(1, 1, 1, sheet.getLastColumn())
+    .getDisplayValues()[0]
+    .map(value => String(value).trim());
+  const hasRecipientColumns = currentHeaders.includes("택배 받는 사람 이름");
+
+  if (!hasRecipientColumns && headers[0] === "주문일시") {
+    const payerColumn = currentHeaders.indexOf("입금자") + 1;
+    sheet.insertColumnsBefore(payerColumn > 0 ? payerColumn : 4, 2);
+  }
+
+  if (!hasRecipientColumns && headers[0] === "주문번호") {
+    const addressColumn = currentHeaders.findIndex(value =>
+      value === "받으실 주소" || value === "택배 받으실 주소"
+    ) + 1;
+    sheet.insertColumnsBefore(addressColumn > 0 ? addressColumn : 5, 2);
+  }
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.setFrozenRows(1);
 }
 
 function normalizePhone_(value) {

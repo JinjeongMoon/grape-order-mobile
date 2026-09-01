@@ -20,6 +20,8 @@ type Settings = {
 type Customer = {
   name: string;
   phone: string;
+  recipientName: string;
+  recipientPhone: string;
   address: string;
   payerName: string;
   note: string;
@@ -58,12 +60,14 @@ const ITEM_SHEET_NAME = "주문상품";
 const SETTINGS_PROPERTY_KEY = "GRAPE_ORDER_SETTINGS";
 
 const ORDER_HEADERS = [
-  "주문일시", "이름", "전화번호", "입금자", "주문상품",
-  "요청사항", "주소", "총박스", "총금액", "주문번호"
+  "주문일시", "주문자 이름", "주문자 연락처", "택배 받는 사람 이름",
+  "택배 받는 사람 연락처", "입금자", "주문상품", "요청사항",
+  "택배 받으실 주소", "총박스", "총금액", "주문번호"
 ];
 
 const ITEM_HEADERS = [
-  "주문번호", "주문일시", "주문자명", "전화번호", "받으실 주소",
+  "주문번호", "주문일시", "주문자 이름", "주문자 연락처",
+  "택배 받는 사람 이름", "택배 받는 사람 연락처", "택배 받으실 주소",
   "입금자명", "요청사항", "상품명", "단가", "수량(박스)", "소계",
   "주문 총 박스", "주문 총 금액"
 ];
@@ -101,6 +105,7 @@ function doPost(e) {
 
     const customer = data.customer || {};
     const phone = normalizePhone_(customer.phone);
+    const recipientPhone = normalizePhone_(customer.recipientPhone);
     const items = Array.isArray(data.items) ? data.items : [];
     const storedSettings = getStoredSettings_();
     const soldOutProductIds = new Set(storedSettings.soldOutProductIds);
@@ -133,6 +138,8 @@ function doPost(e) {
       orderedAt,
       customer.name || "",
       phone,
+      customer.recipientName || "",
+      recipientPhone,
       customer.payerName || "",
       itemSummary,
       customer.note || "",
@@ -145,6 +152,7 @@ function doPost(e) {
     const orderRange = orderSheet.getRange(orderRowIndex, 1, 1, ORDER_HEADERS.length);
     orderRange.setValues([orderRow]);
     orderRange.getCell(1, 3).setNumberFormat("@").setValue(phone);
+    orderRange.getCell(1, 5).setNumberFormat("@").setValue(recipientPhone);
 
     // 품목당 한 줄: 주문상품 시트에 저장합니다.
     const itemRows = items.map(item => [
@@ -152,6 +160,8 @@ function doPost(e) {
       orderedAt,
       customer.name || "",
       phone,
+      customer.recipientName || "",
+      recipientPhone,
       customer.address || "",
       customer.payerName || "",
       customer.note || "",
@@ -166,9 +176,11 @@ function doPost(e) {
     if (itemRows.length > 0) {
       const itemStartRow = itemSheet.getLastRow() + 1;
       const itemRange = itemSheet.getRange(itemStartRow, 1, itemRows.length, ITEM_HEADERS.length);
-      const phoneRange = itemSheet.getRange(itemStartRow, 4, itemRows.length, 1);
       itemRange.setValues(itemRows);
-      phoneRange.setNumberFormat("@").setValues(itemRows.map(() => [phone]));
+      itemSheet.getRange(itemStartRow, 4, itemRows.length, 1)
+        .setNumberFormat("@").setValues(itemRows.map(() => [phone]));
+      itemSheet.getRange(itemStartRow, 6, itemRows.length, 1)
+        .setNumberFormat("@").setValues(itemRows.map(() => [recipientPhone]));
     }
 
     SpreadsheetApp.flush();
@@ -274,7 +286,29 @@ function ensureHeader_(sheet, headers) {
     sheet.insertRowBefore(1);
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
+    return;
   }
+
+  const currentHeaders = sheet
+    .getRange(1, 1, 1, sheet.getLastColumn())
+    .getDisplayValues()[0]
+    .map(value => String(value).trim());
+  const hasRecipientColumns = currentHeaders.includes("택배 받는 사람 이름");
+
+  if (!hasRecipientColumns && headers[0] === "주문일시") {
+    const payerColumn = currentHeaders.indexOf("입금자") + 1;
+    sheet.insertColumnsBefore(payerColumn > 0 ? payerColumn : 4, 2);
+  }
+
+  if (!hasRecipientColumns && headers[0] === "주문번호") {
+    const addressColumn = currentHeaders.findIndex(value =>
+      value === "받으실 주소" || value === "택배 받으실 주소"
+    ) + 1;
+    sheet.insertColumnsBefore(addressColumn > 0 ? addressColumn : 5, 2);
+  }
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.setFrozenRows(1);
 }
 
 function normalizePhone_(value) {
@@ -460,10 +494,13 @@ export default function Home() {
   const [customer, setCustomer] = useState<Customer>({
     name: "",
     phone: "",
+    recipientName: "",
+    recipientPhone: "",
     address: "",
     payerName: "",
     note: "",
   });
+  const [isRecipientSameAsCustomer, setIsRecipientSameAsCustomer] = useState(false);
   const [mode, setMode] = useState<"order" | "admin">("order");
   const [status, setStatus] = useState("");
   const [toast, setToast] = useState("");
@@ -703,7 +740,7 @@ export default function Home() {
     setIsSubmitting(true);
 
     if (!customer.name.trim() || !customer.phone.trim() || !customer.payerName.trim()) {
-      setStatus("이름, 전화번호, 입금자명을 입력해 주세요.");
+      setStatus("주문자 이름, 주문자 연락처, 입금자명을 입력해 주세요.");
       setIsSubmitting(false);
       return;
     }
@@ -751,7 +788,16 @@ export default function Home() {
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(payload),
       });
-      setCustomer({ name: "", phone: "", address: "", payerName: "", note: "" });
+      setCustomer({
+        name: "",
+        phone: "",
+        recipientName: "",
+        recipientPhone: "",
+        address: "",
+        payerName: "",
+        note: "",
+      });
+      setIsRecipientSameAsCustomer(false);
       setQuantities(
         Object.fromEntries(settings.products.map((product) => [product.id, 0])),
       );
@@ -922,40 +968,95 @@ export default function Home() {
             <section className="grid gap-3 rounded-lg bg-white p-4">
               <label className="grid gap-1 text-sm font-bold">
                 <span className="flex items-center gap-1">
-                  이름 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
+                  주문자 이름 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
                 </span>
                 <input
                   autoComplete="name"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
                   disabled={isSubmitting}
-                  onChange={(event) =>
-                    setCustomer((current) => ({ ...current, name: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    const name = event.target.value;
+                    setCustomer((current) => ({
+                      ...current,
+                      name,
+                      ...(isRecipientSameAsCustomer ? { recipientName: name } : {}),
+                    }));
+                  }}
                   placeholder="홍길동"
                   value={customer.name}
                 />
               </label>
               <label className="grid gap-1 text-sm font-bold">
                 <span className="flex items-center gap-1">
-                  전화번호 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
+                  주문자 연락처 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
                 </span>
                 <input
                   autoComplete="tel"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
                   disabled={isSubmitting}
                   inputMode="tel"
-                  onChange={(event) =>
-                    setCustomer((current) => ({ ...current, phone: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    const phone = event.target.value;
+                    setCustomer((current) => ({
+                      ...current,
+                      phone,
+                      ...(isRecipientSameAsCustomer ? { recipientPhone: phone } : {}),
+                    }));
+                  }}
                   placeholder="010-0000-0000"
                   value={customer.phone}
                 />
               </label>
+              <label className="flex items-center gap-2 rounded-md bg-[#f6f1e5] px-3 py-3 text-sm font-bold">
+                <input
+                  checked={isRecipientSameAsCustomer}
+                  className="h-5 w-5 accent-[#4d1630]"
+                  disabled={isSubmitting}
+                  onChange={(event) => {
+                    const isChecked = event.target.checked;
+                    setIsRecipientSameAsCustomer(isChecked);
+
+                    if (isChecked) {
+                      setCustomer((current) => ({
+                        ...current,
+                        recipientName: current.name,
+                        recipientPhone: current.phone,
+                      }));
+                    }
+                  }}
+                  type="checkbox"
+                />
+                <span>주문자와 택배 받을 사람이 같습니다.</span>
+              </label>
               <label className="grid gap-1 text-sm font-bold">
-                택배 받으실 주소 (선택)
-                <span className="text-sm font-black leading-5 text-[#8e294c]">
-                  선물하실 경우, 받으실 분의 주소, 연락처, 성함을 정확하게 적어 주세요.
-                </span>
+                택배 받는 사람 이름
+                <input
+                  autoComplete="shipping name"
+                  className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                  disabled={isSubmitting || isRecipientSameAsCustomer}
+                  onChange={(event) =>
+                    setCustomer((current) => ({ ...current, recipientName: event.target.value }))
+                  }
+                  placeholder="홍길동"
+                  value={customer.recipientName}
+                />
+              </label>
+              <label className="grid gap-1 text-sm font-bold">
+                택배 받는 사람 연락처
+                <input
+                  autoComplete="shipping tel"
+                  className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                  disabled={isSubmitting || isRecipientSameAsCustomer}
+                  inputMode="tel"
+                  onChange={(event) =>
+                    setCustomer((current) => ({ ...current, recipientPhone: event.target.value }))
+                  }
+                  placeholder="010-0000-0000"
+                  value={customer.recipientPhone}
+                />
+              </label>
+              <label className="grid gap-1 text-sm font-bold">
+                택배 받으실 주소
                 <input
                   autoComplete="street-address"
                   className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
@@ -963,7 +1064,7 @@ export default function Home() {
                   onChange={(event) =>
                     setCustomer((current) => ({ ...current, address: event.target.value }))
                   }
-                  placeholder="주소, 연락처, 성함을 적어주세요."
+                  placeholder="주소를 적어주세요. *택배가 1건 이상이시면, 따로 따로 주문을 해주세요."
                   value={customer.address}
                 />
               </label>
