@@ -1016,13 +1016,11 @@ export default function Home() {
                     const isChecked = event.target.checked;
                     setIsRecipientSameAsCustomer(isChecked);
 
-                    if (isChecked) {
-                      setCustomer((current) => ({
-                        ...current,
-                        recipientName: current.name,
-                        recipientPhone: current.phone,
-                      }));
-                    }
+                    setCustomer((current) => ({
+                      ...current,
+                      recipientName: isChecked ? current.name : "",
+                      recipientPhone: isChecked ? current.phone : "",
+                    }));
                   }}
                   type="checkbox"
                 />
