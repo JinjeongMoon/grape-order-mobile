@@ -4,7 +4,7 @@
 
 ## 기능
 
-- 상품 5개 이름/가격 관리자 입력
+- 상품 6개 구성과 가격 제공
 - 1박스 단위 수량 선택
 - 장바구니 총액 자동 계산
 - 주문자·택배 수령인 이름과 연락처, 배송 주소, 요청사항 입력
@@ -12,6 +12,7 @@
 - 주문 중복 전송 방지
 - 관리자 비밀번호 보호
 - 관리자 상품별 품절 토글
+- 관리자 상품별 주문서 표시/숨김 토글
 - Google Apps Script 웹앱 URL로 주문 저장
 
 ## 개발
@@ -35,7 +36,7 @@ npm run build
 
 관리자 화면에서도 `Google Apps Script 웹앱 URL`을 수정한 뒤 `설정 저장하고 공개 링크 만들기`를 누르면, 해당 설정이 포함된 공유 링크를 만들 수 있습니다.
 
-품절 상태는 Google Apps Script의 `PropertiesService`에 저장됩니다. `apps-script/Code.gs`를 Apps Script 편집기에 붙여 넣고 새 버전으로 배포하면, 기존 주문서 URL에서도 최신 품절 상태를 불러와 품절 상품의 수량 추가를 막습니다.
+품절 및 주문서 표시 상태는 Google Apps Script의 `PropertiesService`에 저장됩니다. `apps-script/Code.gs`를 Apps Script 편집기에 붙여 넣고 새 버전으로 배포하면, 기존 주문서 URL에서도 최신 상품 상태를 불러옵니다.
 
 ## GitHub Pages 배포
 

@@ -52,12 +52,21 @@ function doPost(e) {
     const items = Array.isArray(data.items) ? data.items : [];
     const storedSettings = getStoredSettings_();
     const soldOutProductIds = new Set(storedSettings.soldOutProductIds);
+    const hiddenProductIds = new Set(storedSettings.hiddenProductIds);
     const soldOutItems = items.filter(item => soldOutProductIds.has(String(item.id || "")));
+    const hiddenItems = items.filter(item => hiddenProductIds.has(String(item.id || "")));
 
     if (soldOutItems.length > 0) {
       throw new Error(
         "품절된 상품이 포함되어 있습니다: " +
         soldOutItems.map(item => String(item.name || item.id || "")).join(", ")
+      );
+    }
+
+    if (hiddenItems.length > 0) {
+      throw new Error(
+        "현재 주문할 수 없는 상품이 포함되어 있습니다: " +
+        hiddenItems.map(item => String(item.name || item.id || "")).join(", ")
       );
     }
 
@@ -139,7 +148,7 @@ function getStoredSettings_() {
   const raw = PropertiesService.getScriptProperties().getProperty(SETTINGS_PROPERTY_KEY);
 
   if (!raw) {
-    return { shopName: null, introText: null, soldOutProductIds: [], updatedAt: "" };
+    return { shopName: null, introText: null, soldOutProductIds: [], hiddenProductIds: [], updatedAt: "" };
   }
 
   try {
@@ -149,15 +158,19 @@ function getStoredSettings_() {
     const soldOutProductIds = Array.isArray(parsed.soldOutProductIds)
       ? parsed.soldOutProductIds.map(String)
       : [];
+    const hiddenProductIds = Array.isArray(parsed.hiddenProductIds)
+      ? parsed.hiddenProductIds.map(String)
+      : [];
 
     return {
       shopName: hasShopName ? String(parsed.shopName || "") : null,
       introText: hasIntroText ? String(parsed.introText || "") : null,
       soldOutProductIds: soldOutProductIds,
+      hiddenProductIds: hiddenProductIds,
       updatedAt: String(parsed.updatedAt || "")
     };
   } catch (error) {
-    return { shopName: null, introText: null, soldOutProductIds: [], updatedAt: "" };
+    return { shopName: null, introText: null, soldOutProductIds: [], hiddenProductIds: [], updatedAt: "" };
   }
 }
 
@@ -168,6 +181,7 @@ function getPublicSettings_() {
     shopName: settings.shopName,
     introText: settings.introText,
     soldOutProductIds: settings.soldOutProductIds,
+    hiddenProductIds: settings.hiddenProductIds,
     updatedAt: settings.updatedAt
   };
 }
@@ -176,6 +190,9 @@ function saveSettings_(data) {
   const soldOutProductIds = Array.isArray(data.soldOutProductIds)
     ? data.soldOutProductIds.map(String)
     : [];
+  const hiddenProductIds = Array.isArray(data.hiddenProductIds)
+    ? data.hiddenProductIds.map(String)
+    : [];
 
   PropertiesService.getScriptProperties().setProperty(
     SETTINGS_PROPERTY_KEY,
@@ -183,6 +200,7 @@ function saveSettings_(data) {
       shopName: String(data.shopName || ""),
       introText: String(data.introText || ""),
       soldOutProductIds: soldOutProductIds,
+      hiddenProductIds: hiddenProductIds,
       updatedAt: new Date().toISOString()
     })
   );

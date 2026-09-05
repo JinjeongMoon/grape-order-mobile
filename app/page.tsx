@@ -7,6 +7,7 @@ type Product = {
   name: string;
   price: number;
   soldOut: boolean;
+  visible: boolean;
 };
 
 type Settings = {
@@ -33,6 +34,7 @@ const giftSetGuide = [
   { id: "product-3", name: "프리미엄 2KG", composition: "유럽포도 랜덤 3~4종", price: 55000 },
   { id: "product-4", name: "베이직 4KG", composition: "유럽포도 랜덤 1~2종", price: 65000 },
   { id: "product-5", name: "베이직 2KG", composition: "유럽포도 랜덤 1~2종", price: 35000 },
+  { id: "product-6", name: "추가상품", composition: "유럽포도 랜덤 1~2종", price: 40000 },
 ];
 
 const fixedBankNotice = "계좌이체: 농협 351-1382-8783-43 황의대";
@@ -49,7 +51,13 @@ const defaultSettings: Settings = {
 
 < 주문 문의 >
 010-5490-7444`,
-  products: giftSetGuide.map(({ id, name, price }) => ({ id, name, price, soldOut: false })),
+  products: giftSetGuide.map(({ id, name, price }) => ({
+    id,
+    name,
+    price,
+    soldOut: false,
+    visible: true,
+  })),
   bankNotice: fixedBankNotice,
   sheetEndpoint:
     "https://script.google.com/macros/s/AKfycbw97tf6AbG1mbGDxU3fAdPF1QCaaD8dIS3zlX-v8Ykaf3SDw5AK8Z-WetJAMOt4y4lM4A/exec",
@@ -109,12 +117,21 @@ function doPost(e) {
     const items = Array.isArray(data.items) ? data.items : [];
     const storedSettings = getStoredSettings_();
     const soldOutProductIds = new Set(storedSettings.soldOutProductIds);
+    const hiddenProductIds = new Set(storedSettings.hiddenProductIds);
     const soldOutItems = items.filter(item => soldOutProductIds.has(String(item.id || "")));
+    const hiddenItems = items.filter(item => hiddenProductIds.has(String(item.id || "")));
 
     if (soldOutItems.length > 0) {
       throw new Error(
         "품절된 상품이 포함되어 있습니다: " +
         soldOutItems.map(item => String(item.name || item.id || "")).join(", ")
+      );
+    }
+
+    if (hiddenItems.length > 0) {
+      throw new Error(
+        "현재 주문할 수 없는 상품이 포함되어 있습니다: " +
+        hiddenItems.map(item => String(item.name || item.id || "")).join(", ")
       );
     }
 
@@ -198,7 +215,7 @@ function getStoredSettings_() {
   const raw = PropertiesService.getScriptProperties().getProperty(SETTINGS_PROPERTY_KEY);
 
   if (!raw) {
-    return { shopName: null, introText: null, soldOutProductIds: [], updatedAt: "" };
+    return { shopName: null, introText: null, soldOutProductIds: [], hiddenProductIds: [], updatedAt: "" };
   }
 
   try {
@@ -208,15 +225,19 @@ function getStoredSettings_() {
     const soldOutProductIds = Array.isArray(parsed.soldOutProductIds)
       ? parsed.soldOutProductIds.map(String)
       : [];
+    const hiddenProductIds = Array.isArray(parsed.hiddenProductIds)
+      ? parsed.hiddenProductIds.map(String)
+      : [];
 
     return {
       shopName: hasShopName ? String(parsed.shopName || "") : null,
       introText: hasIntroText ? String(parsed.introText || "") : null,
       soldOutProductIds: soldOutProductIds,
+      hiddenProductIds: hiddenProductIds,
       updatedAt: String(parsed.updatedAt || "")
     };
   } catch (error) {
-    return { shopName: null, introText: null, soldOutProductIds: [], updatedAt: "" };
+    return { shopName: null, introText: null, soldOutProductIds: [], hiddenProductIds: [], updatedAt: "" };
   }
 }
 
@@ -227,6 +248,7 @@ function getPublicSettings_() {
     shopName: settings.shopName,
     introText: settings.introText,
     soldOutProductIds: settings.soldOutProductIds,
+    hiddenProductIds: settings.hiddenProductIds,
     updatedAt: settings.updatedAt
   };
 }
@@ -235,6 +257,9 @@ function saveSettings_(data) {
   const soldOutProductIds = Array.isArray(data.soldOutProductIds)
     ? data.soldOutProductIds.map(String)
     : [];
+  const hiddenProductIds = Array.isArray(data.hiddenProductIds)
+    ? data.hiddenProductIds.map(String)
+    : [];
 
   PropertiesService.getScriptProperties().setProperty(
     SETTINGS_PROPERTY_KEY,
@@ -242,6 +267,7 @@ function saveSettings_(data) {
       shopName: String(data.shopName || ""),
       introText: String(data.introText || ""),
       soldOutProductIds: soldOutProductIds,
+      hiddenProductIds: hiddenProductIds,
       updatedAt: new Date().toISOString()
     })
   );
@@ -363,6 +389,7 @@ function mergeProductsWithSavedState(savedProducts: Product[] | undefined) {
     return {
       ...product,
       soldOut: Boolean(saved?.soldOut),
+      visible: saved?.visible !== false,
     };
   });
 }
@@ -413,6 +440,7 @@ type RemoteSettings = {
   shopName?: string;
   introText?: string;
   soldOutProductIds?: string[];
+  hiddenProductIds?: string[];
 };
 
 function applyRemoteSettings(
@@ -421,6 +449,8 @@ function applyRemoteSettings(
   options?: { preserveLocalText?: boolean },
 ) {
   const soldOutSet = new Set(remoteSettings.soldOutProductIds || []);
+  const hiddenSet = new Set(remoteSettings.hiddenProductIds || []);
+  const hasRemoteVisibility = Array.isArray(remoteSettings.hiddenProductIds);
   const preserveLocalText = Boolean(options?.preserveLocalText);
   return {
     ...settings,
@@ -435,6 +465,7 @@ function applyRemoteSettings(
     products: settings.products.map((product) => ({
       ...product,
       soldOut: soldOutSet.has(product.id),
+      visible: hasRemoteVisibility ? !hiddenSet.has(product.id) : product.visible,
     })),
   };
 }
@@ -442,6 +473,12 @@ function applyRemoteSettings(
 function getSoldOutProductIds(settings: Settings) {
   return settings.products
     .filter((product) => product.soldOut)
+    .map((product) => product.id);
+}
+
+function getHiddenProductIds(settings: Settings) {
+  return settings.products
+    .filter((product) => !product.visible)
     .map((product) => product.id);
 }
 
@@ -547,18 +584,25 @@ export default function Home() {
   }, [toast]);
 
   const activeProducts = useMemo(
-    () => settings.products.filter((product) => product.name && product.price > 0),
+    () =>
+      settings.products.filter(
+        (product) => product.visible && product.name && product.price > 0,
+      ),
     [settings.products],
   );
 
   const productGuide = useMemo(
     () =>
-      giftSetGuide.map((giftSet) => ({
-        ...giftSet,
-        soldOut: Boolean(
-          settings.products.find((product) => product.id === giftSet.id)?.soldOut,
-        ),
-      })),
+      giftSetGuide
+        .filter((giftSet) =>
+          settings.products.find((product) => product.id === giftSet.id)?.visible !== false,
+        )
+        .map((giftSet) => ({
+          ...giftSet,
+          soldOut: Boolean(
+            settings.products.find((product) => product.id === giftSet.id)?.soldOut,
+          ),
+        })),
     [settings.products],
   );
 
@@ -584,7 +628,7 @@ export default function Home() {
       const next = { ...current };
 
       for (const product of settings.products) {
-        if (product.soldOut && next[product.id]) {
+        if ((!product.visible || product.soldOut) && next[product.id]) {
           next[product.id] = 0;
           hasChanges = true;
         }
@@ -597,8 +641,12 @@ export default function Home() {
   function updateQuantity(productId: string, amount: number) {
     const product = settings.products.find((candidate) => candidate.id === productId);
 
-    if (amount > 0 && product?.soldOut) {
-      setStatus("품절된 상품은 주문할 수 없습니다.");
+    if (amount > 0 && (!product?.visible || product.soldOut)) {
+      setStatus(
+        product?.soldOut
+          ? "품절된 상품은 주문할 수 없습니다."
+          : "숨긴 상품은 주문할 수 없습니다.",
+      );
       return;
     }
 
@@ -657,6 +705,28 @@ export default function Home() {
       });
   }
 
+  function toggleProductVisibility(productId: string) {
+    const nextSettings = {
+      ...settings,
+      products: settings.products.map((product) =>
+        product.id === productId
+          ? { ...product, visible: !product.visible }
+          : product,
+      ),
+    };
+
+    setSettings(nextSettings);
+    const normalized = persistSettingsInBrowser(nextSettings);
+
+    saveRemoteInventorySettings(normalized)
+      .then(() => {
+        setStatus("상품 표시 상태가 저장됐어요. 새로고침해도 유지됩니다.");
+      })
+      .catch(() => {
+        setStatus("이 기기에는 저장됐지만, 중앙 상품 표시 상태 저장은 실패했어요. Apps Script 주소를 확인해 주세요.");
+      });
+  }
+
   async function saveRemoteInventorySettings(nextSettings: Settings) {
     if (!nextSettings.sheetEndpoint.trim()) {
       return;
@@ -674,6 +744,7 @@ export default function Home() {
         shopName: nextSettings.shopName,
         introText: nextSettings.introText,
         soldOutProductIds: getSoldOutProductIds(nextSettings),
+        hiddenProductIds: getHiddenProductIds(nextSettings),
       }),
     });
   }
@@ -683,9 +754,9 @@ export default function Home() {
 
     try {
       await saveRemoteInventorySettings(normalized);
-      setStatus("설정과 품절 상태가 저장됐어요. 기존 주문서 링크에도 최신 품절 상태가 반영됩니다.");
+      setStatus("설정과 상품 상태가 저장됐어요. 기존 주문서 링크에도 최신 상태가 반영됩니다.");
     } catch {
-      setStatus("이 기기에는 저장됐지만, 중앙 품절 상태 저장은 실패했어요. Apps Script 주소를 확인해 주세요.");
+      setStatus("이 기기에는 저장됐지만, 중앙 상품 상태 저장은 실패했어요. Apps Script 주소를 확인해 주세요.");
     }
   }
 
@@ -1132,42 +1203,61 @@ export default function Home() {
             <div className="rounded-lg bg-white p-4">
               <h2 className="text-xl font-black">관리자 설정</h2>
               <p className="mt-1 text-sm font-semibold text-[#6d6a55]">
-                상품과 계좌정보는 고정되어 있으며, 안내문과 품절 상태를 저장할 수 있습니다.
+                상품과 계좌정보는 고정되어 있으며, 안내문과 상품 상태를 저장할 수 있습니다.
               </p>
             </div>
 
             <section className="grid gap-3 rounded-lg bg-white p-4">
               <div>
-                <h3 className="text-base font-black">상품 판매 상태</h3>
+                <h3 className="text-base font-black">상품 표시 및 판매 상태</h3>
                 <p className="mt-1 text-sm font-semibold text-[#6d6a55]">
-                  품절로 바꾸면 손님 화면에서 수량 추가가 막힙니다.
+                  표시를 끄면 주문서에서 숨겨지고, 품절로 바꾸면 수량 추가가 막힙니다.
                 </p>
               </div>
               <div className="grid gap-2">
                 {settings.products.map((product) => (
-                  <label
-                    className="flex items-center justify-between gap-3 rounded-md border border-[#e6ddc9] px-3 py-3"
+                  <div
+                    className="grid gap-3 rounded-md border border-[#e6ddc9] px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center"
                     key={product.id}
                   >
                     <span className="font-bold">{product.name}</span>
-                    <span className="flex items-center gap-2">
-                      <span
-                        className={
-                          product.soldOut
-                            ? "text-sm font-black text-[#b33a2b]"
-                            : "text-sm font-black text-[#426b2f]"
-                        }
-                      >
-                        {product.soldOut ? "품절" : "판매중"}
-                      </span>
-                      <input
-                        checked={product.soldOut}
-                        className="h-5 w-5 accent-[#b33a2b]"
-                        onChange={() => toggleProductSoldOut(product.id)}
-                        type="checkbox"
-                      />
-                    </span>
-                  </label>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                      <label className="flex items-center gap-2">
+                        <input
+                          checked={product.visible}
+                          className="h-5 w-5 accent-[#426b2f]"
+                          onChange={() => toggleProductVisibility(product.id)}
+                          type="checkbox"
+                        />
+                        <span
+                          className={
+                            product.visible
+                              ? "text-sm font-black text-[#426b2f]"
+                              : "text-sm font-black text-[#817b69]"
+                          }
+                        >
+                          {product.visible ? "주문서 표시" : "주문서 숨김"}
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          checked={product.soldOut}
+                          className="h-5 w-5 accent-[#b33a2b]"
+                          onChange={() => toggleProductSoldOut(product.id)}
+                          type="checkbox"
+                        />
+                        <span
+                          className={
+                            product.soldOut
+                              ? "text-sm font-black text-[#b33a2b]"
+                              : "text-sm font-black text-[#426b2f]"
+                          }
+                        >
+                          {product.soldOut ? "품절" : "판매중"}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
                 ))}
               </div>
             </section>
