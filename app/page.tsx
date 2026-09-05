@@ -34,7 +34,7 @@ const giftSetGuide = [
   { id: "product-3", name: "프리미엄 2KG", composition: "유럽포도 랜덤 3~4종", price: 55000 },
   { id: "product-4", name: "베이직 4KG", composition: "유럽포도 랜덤 1~2종", price: 65000 },
   { id: "product-5", name: "베이직 2KG", composition: "유럽포도 랜덤 1~2종", price: 35000 },
-  { id: "product-6", name: "추가상품", composition: "유럽포도 랜덤 1~2종", price: 40000 },
+  { id: "product-6", name: "스페셜 2kg", composition: "유럽포도 3종", price: 45000 },
 ];
 
 const fixedBankNotice = "계좌이체: 농협 351-1382-8783-43 황의대";
