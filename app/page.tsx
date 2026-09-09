@@ -73,6 +73,7 @@ const ITEM_SHEET_NAME = "주문상품";
 const STAFF_ORDER_SHEET_NAME = "[직원용] 주문서";
 const STAFF_ITEM_SHEET_NAME = "[직원용] 주문상품";
 const SETTINGS_PROPERTY_KEY = "GRAPE_ORDER_SETTINGS";
+const STAFF_SETTINGS_PROPERTY_KEY = "GRAPE_STAFF_ORDER_SETTINGS";
 
 const ORDER_HEADERS = [
   "주문일시", "주문자 이름", "주문자 연락처", "택배 받는 사람 이름",
@@ -104,9 +105,10 @@ const STAFF_PRODUCTS = {
 
 function doGet(e) {
   const action = String((e && e.parameter && e.parameter.action) || "");
+  const orderType = String((e && e.parameter && e.parameter.orderType) || "");
 
   if (action === "settings") {
-    return jsonp_(getPublicSettings_(), e && e.parameter && e.parameter.callback);
+    return jsonp_(getPublicSettings_(orderType), e && e.parameter && e.parameter.callback);
   }
 
   return jsonp_({ ok: false, message: "알 수 없는 요청입니다." }, e && e.parameter && e.parameter.callback);
@@ -139,15 +141,11 @@ function doPost(e) {
     const recipientPhone = normalizePhone_(customer.recipientPhone);
     const submittedItems = Array.isArray(data.items) ? data.items : [];
     const items = isStaffOrder ? normalizeStaffItems_(submittedItems) : submittedItems;
-    const storedSettings = getStoredSettings_();
+    const storedSettings = getStoredSettings_(isStaffOrder ? "staff" : "standard");
     const soldOutProductIds = new Set(storedSettings.soldOutProductIds);
     const hiddenProductIds = new Set(storedSettings.hiddenProductIds);
-    const soldOutItems = isStaffOrder
-      ? []
-      : items.filter(item => soldOutProductIds.has(String(item.id || "")));
-    const hiddenItems = isStaffOrder
-      ? []
-      : items.filter(item => hiddenProductIds.has(String(item.id || "")));
+    const soldOutItems = items.filter(item => soldOutProductIds.has(String(item.id || "")));
+    const hiddenItems = items.filter(item => hiddenProductIds.has(String(item.id || "")));
 
     if (soldOutItems.length > 0) {
       throw new Error(
@@ -274,8 +272,16 @@ function doPost(e) {
   }
 }
 
-function getStoredSettings_() {
-  const raw = PropertiesService.getScriptProperties().getProperty(SETTINGS_PROPERTY_KEY);
+function getSettingsPropertyKey_(orderType) {
+  return String(orderType || "") === "staff"
+    ? STAFF_SETTINGS_PROPERTY_KEY
+    : SETTINGS_PROPERTY_KEY;
+}
+
+function getStoredSettings_(orderType) {
+  const raw = PropertiesService.getScriptProperties().getProperty(
+    getSettingsPropertyKey_(orderType)
+  );
 
   if (!raw) {
     return { shopName: null, introText: null, soldOutProductIds: [], hiddenProductIds: [], updatedAt: "" };
@@ -304,8 +310,8 @@ function getStoredSettings_() {
   }
 }
 
-function getPublicSettings_() {
-  const settings = getStoredSettings_();
+function getPublicSettings_(orderType) {
+  const settings = getStoredSettings_(orderType);
   return {
     ok: true,
     shopName: settings.shopName,
@@ -325,7 +331,7 @@ function saveSettings_(data) {
     : [];
 
   PropertiesService.getScriptProperties().setProperty(
-    SETTINGS_PROPERTY_KEY,
+    getSettingsPropertyKey_(data.orderType),
     JSON.stringify({
       shopName: String(data.shopName || ""),
       introText: String(data.introText || ""),
@@ -477,8 +483,12 @@ function encodeSettings(settings: Settings) {
   return btoa(unescape(encodeURIComponent(compact)));
 }
 
-function mergeProductsWithSavedState(savedProducts: Product[] | undefined) {
-  return defaultSettings.products.map((product) => {
+function mergeProductsWithSavedState(
+  savedProducts: Product[] | undefined,
+  productGuide: Array<{ id: string; name: string; price: number }> = giftSetGuide,
+) {
+  return productGuide.map(({ id, name, price }) => {
+    const product = { id, name, price, soldOut: false, visible: true };
     const saved = savedProducts?.find((candidate) => candidate.id === product.id);
     return {
       ...product,
@@ -488,20 +498,35 @@ function mergeProductsWithSavedState(savedProducts: Product[] | undefined) {
   });
 }
 
-function decodeSettings(value: string): Settings | null {
+function getDefaultSettingsForVariant(isStaffOrder: boolean): Settings {
+  if (!isStaffOrder) {
+    return defaultSettings;
+  }
+
+  return {
+    ...defaultSettings,
+    products: mergeProductsWithSavedState(undefined, staffGiftSetGuide),
+  };
+}
+
+function decodeSettings(value: string, isStaffOrder: boolean): Settings | null {
   try {
     const decoded = decodeURIComponent(escape(atob(value)));
     const parsed = JSON.parse(decoded) as Settings;
+    const variantDefaults = getDefaultSettingsForVariant(isStaffOrder);
     return {
       shopName:
         typeof parsed.shopName === "string" && parsed.shopName.trim()
           ? parsed.shopName
-          : defaultSettings.shopName,
+          : variantDefaults.shopName,
       introText:
         typeof parsed.introText === "string"
           ? parsed.introText
-          : defaultSettings.introText,
-      products: mergeProductsWithSavedState(parsed.products),
+          : variantDefaults.introText,
+      products: mergeProductsWithSavedState(
+        parsed.products,
+        isStaffOrder ? staffGiftSetGuide : giftSetGuide,
+      ),
       bankNotice: fixedBankNotice,
       sheetEndpoint: parsed.sheetEndpoint || defaultSettings.sheetEndpoint,
     };
@@ -511,22 +536,27 @@ function decodeSettings(value: string): Settings | null {
 }
 
 function loadSettingsFromUrl() {
+  const isStaffOrder = isStaffOrderUrl();
+  const variantDefaults = getDefaultSettingsForVariant(isStaffOrder);
+
   if (typeof window === "undefined") {
-    return defaultSettings;
+    return variantDefaults;
   }
 
   const url = new URL(window.location.href);
   const shared = url.searchParams.get("config");
   if (shared) {
-    return decodeSettings(shared) ?? defaultSettings;
+    return decodeSettings(shared, isStaffOrder) ?? variantDefaults;
   }
 
-  const saved = window.localStorage.getItem("grape-order-settings");
+  const saved = window.localStorage.getItem(
+    isStaffOrder ? "grape-staff-order-settings" : "grape-order-settings",
+  );
   if (!saved) {
-    return defaultSettings;
+    return variantDefaults;
   }
 
-  return decodeSettings(saved) ?? defaultSettings;
+  return decodeSettings(saved, isStaffOrder) ?? variantDefaults;
 }
 
 function isStaffOrderUrl() {
@@ -538,22 +568,7 @@ function isStaffOrderUrl() {
 }
 
 function getInitialSettings() {
-  const settings = loadSettingsFromUrl();
-
-  if (!isStaffOrderUrl()) {
-    return settings;
-  }
-
-  return {
-    ...settings,
-    products: staffGiftSetGuide.map(({ id, name, price }) => ({
-      id,
-      name,
-      price,
-      soldOut: false,
-      visible: true,
-    })),
-  };
+  return loadSettingsFromUrl();
 }
 
 type RemoteSettings = {
@@ -603,7 +618,7 @@ function getHiddenProductIds(settings: Settings) {
     .map((product) => product.id);
 }
 
-function loadRemoteSettings(sheetEndpoint: string) {
+function loadRemoteSettings(sheetEndpoint: string, orderType: "staff" | "standard") {
   if (typeof window === "undefined" || !sheetEndpoint.trim()) {
     return Promise.resolve(null);
   }
@@ -632,6 +647,7 @@ function loadRemoteSettings(sheetEndpoint: string) {
     try {
       const url = new URL(sheetEndpoint);
       url.searchParams.set("action", "settings");
+      url.searchParams.set("orderType", orderType);
       url.searchParams.set("callback", callbackName);
       script.src = url.toString();
       script.onerror = () => {
@@ -678,7 +694,10 @@ export default function Home() {
       Object.fromEntries(next.products.map((product) => [product.id, 0])),
     );
 
-    loadRemoteSettings(next.sheetEndpoint).then((remoteSettings) => {
+    loadRemoteSettings(
+      next.sheetEndpoint,
+      isStaffOrder ? "staff" : "standard",
+    ).then((remoteSettings) => {
       if (!isMounted || !remoteSettings?.ok) {
         return;
       }
@@ -694,7 +713,7 @@ export default function Home() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isStaffOrder]);
 
   useEffect(() => {
     if (!toast) {
@@ -758,7 +777,7 @@ export default function Home() {
 
       return hasChanges ? next : current;
     });
-  }, [settings.products]);
+  }, [isStaffOrder, settings.products]);
 
   function updateQuantity(productId: string, amount: number) {
     const product = settings.products.find((candidate) => candidate.id === productId);
@@ -781,7 +800,10 @@ export default function Home() {
   function normalizeSettingsForSave(nextSettings: Settings) {
     return {
       ...nextSettings,
-      products: mergeProductsWithSavedState(nextSettings.products),
+      products: mergeProductsWithSavedState(
+        nextSettings.products,
+        isStaffOrder ? staffGiftSetGuide : giftSetGuide,
+      ),
       bankNotice: fixedBankNotice,
     };
   }
@@ -789,7 +811,10 @@ export default function Home() {
   function persistSettingsInBrowser(nextSettings: Settings) {
     const normalized = normalizeSettingsForSave(nextSettings);
     const encoded = encodeSettings(normalized);
-    window.localStorage.setItem("grape-order-settings", encoded);
+    window.localStorage.setItem(
+      isStaffOrder ? "grape-staff-order-settings" : "grape-order-settings",
+      encoded,
+    );
 
     const url = new URL(window.location.href);
     url.searchParams.set("config", encoded);
@@ -863,6 +888,7 @@ export default function Home() {
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "settings",
+        orderType: isStaffOrder ? "staff" : "standard",
         shopName: nextSettings.shopName,
         introText: nextSettings.introText,
         soldOutProductIds: getSoldOutProductIds(nextSettings),
@@ -876,7 +902,9 @@ export default function Home() {
 
     try {
       await saveRemoteInventorySettings(normalized);
-      setStatus("설정과 상품 상태가 저장됐어요. 기존 주문서 링크에도 최신 상태가 반영됩니다.");
+      setStatus(
+        `설정과 상품 상태가 저장됐어요. ${isStaffOrder ? "직원용" : "기존"} 주문서 링크에도 최신 상태가 반영됩니다.`,
+      );
     } catch {
       setStatus("이 기기에는 저장됐지만, 중앙 상품 상태 저장은 실패했어요. Apps Script 주소를 확인해 주세요.");
     }
@@ -1039,19 +1067,21 @@ export default function Home() {
               </div>
             </div>
           </div>
-          {!isStaffOrder ? (
-            <button
-              className={
-                mode === "order"
-                  ? "px-1.5 py-1 text-xs font-medium text-[#aaa491] underline-offset-2 hover:text-[#6d6a55] hover:underline"
+          <button
+            className={
+              mode === "order"
+                ? isStaffOrder
+                  ? "px-1.5 py-1 text-xs font-medium text-[#9b8da5] underline-offset-2 hover:text-[#6a4d7d] hover:underline"
+                  : "px-1.5 py-1 text-xs font-medium text-[#aaa491] underline-offset-2 hover:text-[#6d6a55] hover:underline"
+                : isStaffOrder
+                  ? "rounded-full border border-[#d9cfe2] bg-white px-3 py-2 text-sm font-bold text-[#6a4d7d]"
                   : "rounded-full border border-[#d6ccb6] bg-white px-3 py-2 text-sm font-bold"
-              }
-              onClick={handleModeButton}
-              type="button"
-            >
-              {mode === "order" ? "관리" : "주문"}
-            </button>
-          ) : null}
+            }
+            onClick={handleModeButton}
+            type="button"
+          >
+            {mode === "order" ? "관리" : "주문"}
+          </button>
         </header>
 
         {mode === "order" ? (
@@ -1093,7 +1123,7 @@ export default function Home() {
                     : "bg-[#8e294c] px-4 py-3 text-lg font-black text-white"
                 }
               >
-                {isStaffOrder ? "직원용 그랑포도" : "그랑포도 선물 세트"}
+                {isStaffOrder ? "친환경 그랑포도" : "그랑포도 선물 세트"}
               </h2>
               <table className="w-full table-fixed border-collapse text-left">
                 <colgroup>
@@ -1419,7 +1449,9 @@ export default function Home() {
             <div className="rounded-lg bg-white p-4">
               <h2 className="text-xl font-black">관리자 설정</h2>
               <p className="mt-1 text-sm font-semibold text-[#6d6a55]">
-                상품과 계좌정보는 고정되어 있으며, 안내문과 상품 상태를 저장할 수 있습니다.
+                {isStaffOrder
+                  ? "직원용 안내문과 상품 상태는 일반 주문서와 별도로 저장됩니다."
+                  : "상품과 계좌정보는 고정되어 있으며, 안내문과 상품 상태를 저장할 수 있습니다."}
               </p>
             </div>
 

@@ -3,6 +3,7 @@ const ITEM_SHEET_NAME = "주문상품";
 const STAFF_ORDER_SHEET_NAME = "[직원용] 주문서";
 const STAFF_ITEM_SHEET_NAME = "[직원용] 주문상품";
 const SETTINGS_PROPERTY_KEY = "GRAPE_ORDER_SETTINGS";
+const STAFF_SETTINGS_PROPERTY_KEY = "GRAPE_STAFF_ORDER_SETTINGS";
 
 const ORDER_HEADERS = [
   "주문일시", "주문자 이름", "주문자 연락처", "택배 받는 사람 이름",
@@ -34,9 +35,10 @@ const STAFF_PRODUCTS = {
 
 function doGet(e) {
   const action = String((e && e.parameter && e.parameter.action) || "");
+  const orderType = String((e && e.parameter && e.parameter.orderType) || "");
 
   if (action === "settings") {
-    return jsonp_(getPublicSettings_(), e && e.parameter && e.parameter.callback);
+    return jsonp_(getPublicSettings_(orderType), e && e.parameter && e.parameter.callback);
   }
 
   return jsonp_({ ok: false, message: "알 수 없는 요청입니다." }, e && e.parameter && e.parameter.callback);
@@ -69,15 +71,11 @@ function doPost(e) {
     const recipientPhone = normalizePhone_(customer.recipientPhone);
     const submittedItems = Array.isArray(data.items) ? data.items : [];
     const items = isStaffOrder ? normalizeStaffItems_(submittedItems) : submittedItems;
-    const storedSettings = getStoredSettings_();
+    const storedSettings = getStoredSettings_(isStaffOrder ? "staff" : "standard");
     const soldOutProductIds = new Set(storedSettings.soldOutProductIds);
     const hiddenProductIds = new Set(storedSettings.hiddenProductIds);
-    const soldOutItems = isStaffOrder
-      ? []
-      : items.filter(item => soldOutProductIds.has(String(item.id || "")));
-    const hiddenItems = isStaffOrder
-      ? []
-      : items.filter(item => hiddenProductIds.has(String(item.id || "")));
+    const soldOutItems = items.filter(item => soldOutProductIds.has(String(item.id || "")));
+    const hiddenItems = items.filter(item => hiddenProductIds.has(String(item.id || "")));
 
     if (soldOutItems.length > 0) {
       throw new Error(
@@ -202,8 +200,16 @@ function doPost(e) {
   }
 }
 
-function getStoredSettings_() {
-  const raw = PropertiesService.getScriptProperties().getProperty(SETTINGS_PROPERTY_KEY);
+function getSettingsPropertyKey_(orderType) {
+  return String(orderType || "") === "staff"
+    ? STAFF_SETTINGS_PROPERTY_KEY
+    : SETTINGS_PROPERTY_KEY;
+}
+
+function getStoredSettings_(orderType) {
+  const raw = PropertiesService.getScriptProperties().getProperty(
+    getSettingsPropertyKey_(orderType)
+  );
 
   if (!raw) {
     return { shopName: null, introText: null, soldOutProductIds: [], hiddenProductIds: [], updatedAt: "" };
@@ -232,8 +238,8 @@ function getStoredSettings_() {
   }
 }
 
-function getPublicSettings_() {
-  const settings = getStoredSettings_();
+function getPublicSettings_(orderType) {
+  const settings = getStoredSettings_(orderType);
   return {
     ok: true,
     shopName: settings.shopName,
@@ -253,7 +259,7 @@ function saveSettings_(data) {
     : [];
 
   PropertiesService.getScriptProperties().setProperty(
-    SETTINGS_PROPERTY_KEY,
+    getSettingsPropertyKey_(data.orderType),
     JSON.stringify({
       shopName: String(data.shopName || ""),
       introText: String(data.introText || ""),
