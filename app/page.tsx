@@ -37,6 +37,11 @@ const giftSetGuide = [
   { id: "product-6", name: "스페셜 2kg", composition: "유럽포도 3종", price: 45000 },
 ];
 
+const staffGiftSetGuide = [
+  { id: "staff-gold-muscat", name: "골드머스켓 2KG", composition: "친환경 그랑포도", price: 15000 },
+  { id: "staff-italia", name: "이탈리아 2KG", composition: "친환경 그랑포도", price: 25000 },
+];
+
 const fixedBankNotice = "계좌이체: 농협 351-1382-8783-43 황의대";
 
 const defaultSettings: Settings = {
@@ -65,6 +70,8 @@ const defaultSettings: Settings = {
 
 const appsScriptCode = `const ORDER_SHEET_NAME = "주문서";
 const ITEM_SHEET_NAME = "주문상품";
+const STAFF_ORDER_SHEET_NAME = "[직원용] 주문서";
+const STAFF_ITEM_SHEET_NAME = "[직원용] 주문상품";
 const SETTINGS_PROPERTY_KEY = "GRAPE_ORDER_SETTINGS";
 
 const ORDER_HEADERS = [
@@ -79,6 +86,21 @@ const ITEM_HEADERS = [
   "입금자명", "요청사항", "상품명", "단가", "수량(박스)", "소계",
   "주문 총 박스", "주문 총 금액"
 ];
+
+const STAFF_ORDER_HEADERS = [
+  "주문일시", "주문자 이름", "주문자 연락처", "입금자",
+  "주문상품", "총박스", "총금액", "주문번호"
+];
+
+const STAFF_ITEM_HEADERS = [
+  "주문번호", "주문일시", "주문자 이름", "주문자 연락처",
+  "입금자명", "상품명", "단가", "수량(박스)", "소계", "주문 총 박스", "주문 총 금액"
+];
+
+const STAFF_PRODUCTS = {
+  "staff-gold-muscat": { name: "골드머스켓 2KG", price: 15000 },
+  "staff-italia": { name: "이탈리아 2KG", price: 25000 }
+};
 
 function doGet(e) {
   const action = String((e && e.parameter && e.parameter.action) || "");
@@ -111,15 +133,21 @@ function doPost(e) {
       throw new Error("알 수 없는 요청입니다.");
     }
 
+    const isStaffOrder = String(data.orderType || "") === "staff";
     const customer = data.customer || {};
     const phone = normalizePhone_(customer.phone);
     const recipientPhone = normalizePhone_(customer.recipientPhone);
-    const items = Array.isArray(data.items) ? data.items : [];
+    const submittedItems = Array.isArray(data.items) ? data.items : [];
+    const items = isStaffOrder ? normalizeStaffItems_(submittedItems) : submittedItems;
     const storedSettings = getStoredSettings_();
     const soldOutProductIds = new Set(storedSettings.soldOutProductIds);
     const hiddenProductIds = new Set(storedSettings.hiddenProductIds);
-    const soldOutItems = items.filter(item => soldOutProductIds.has(String(item.id || "")));
-    const hiddenItems = items.filter(item => hiddenProductIds.has(String(item.id || "")));
+    const soldOutItems = isStaffOrder
+      ? []
+      : items.filter(item => soldOutProductIds.has(String(item.id || "")));
+    const hiddenItems = isStaffOrder
+      ? []
+      : items.filter(item => hiddenProductIds.has(String(item.id || "")));
 
     if (soldOutItems.length > 0) {
       throw new Error(
@@ -137,8 +165,8 @@ function doPost(e) {
 
     const orderedAt = new Date();
     const orderId = createOrderId_(orderedAt);
-    const totalBoxes = Number(data.totalBoxes) || 0;
-    const total = Number(data.total) || 0;
+    const totalBoxes = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+    const total = items.reduce((sum, item) => sum + (Number(item.subtotal) || 0), 0);
     const itemSummary = items
       .map(item => String(item.name || "") + " x " + (Number(item.quantity) || 0) + "박스")
       .join(", ");
@@ -147,57 +175,92 @@ function doPost(e) {
     hasLock = true;
 
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const orderSheet = getOrderSheet_(spreadsheet);
-    const itemSheet = getItemSheet_(spreadsheet);
+    const orderSheet = isStaffOrder
+      ? getNamedSheet_(spreadsheet, STAFF_ORDER_SHEET_NAME, STAFF_ORDER_HEADERS)
+      : getOrderSheet_(spreadsheet);
+    const itemSheet = isStaffOrder
+      ? getNamedSheet_(spreadsheet, STAFF_ITEM_SHEET_NAME, STAFF_ITEM_HEADERS)
+      : getItemSheet_(spreadsheet);
 
     // 주문당 한 줄: 기존 주문 요약 시트에 저장합니다.
-    const orderRow = [
-      orderedAt,
-      customer.name || "",
-      phone,
-      customer.recipientName || "",
-      recipientPhone,
-      customer.payerName || "",
-      itemSummary,
-      customer.note || "",
-      customer.address || "",
-      totalBoxes,
-      total,
-      orderId
-    ];
+    const orderRow = isStaffOrder
+      ? [
+          orderedAt,
+          customer.name || "",
+          phone,
+          customer.payerName || "",
+          itemSummary,
+          totalBoxes,
+          total,
+          orderId
+        ]
+      : [
+          orderedAt,
+          customer.name || "",
+          phone,
+          customer.recipientName || "",
+          recipientPhone,
+          customer.payerName || "",
+          itemSummary,
+          customer.note || "",
+          customer.address || "",
+          totalBoxes,
+          total,
+          orderId
+        ];
+    const orderHeaders = isStaffOrder ? STAFF_ORDER_HEADERS : ORDER_HEADERS;
     const orderRowIndex = orderSheet.getLastRow() + 1;
-    const orderRange = orderSheet.getRange(orderRowIndex, 1, 1, ORDER_HEADERS.length);
+    const orderRange = orderSheet.getRange(orderRowIndex, 1, 1, orderHeaders.length);
     orderRange.setValues([orderRow]);
     orderRange.getCell(1, 3).setNumberFormat("@").setValue(phone);
-    orderRange.getCell(1, 5).setNumberFormat("@").setValue(recipientPhone);
+    if (!isStaffOrder) {
+      orderRange.getCell(1, 5).setNumberFormat("@").setValue(recipientPhone);
+    }
 
     // 품목당 한 줄: 주문상품 시트에 저장합니다.
-    const itemRows = items.map(item => [
-      orderId,
-      orderedAt,
-      customer.name || "",
-      phone,
-      customer.recipientName || "",
-      recipientPhone,
-      customer.address || "",
-      customer.payerName || "",
-      customer.note || "",
-      item.name || "",
-      Number(item.price) || 0,
-      Number(item.quantity) || 0,
-      Number(item.subtotal) || 0,
-      totalBoxes,
-      total
-    ]);
+    const itemRows = items.map(item => isStaffOrder
+      ? [
+          orderId,
+          orderedAt,
+          customer.name || "",
+          phone,
+          customer.payerName || "",
+          item.name || "",
+          Number(item.price) || 0,
+          Number(item.quantity) || 0,
+          Number(item.subtotal) || 0,
+          totalBoxes,
+          total
+        ]
+      : [
+          orderId,
+          orderedAt,
+          customer.name || "",
+          phone,
+          customer.recipientName || "",
+          recipientPhone,
+          customer.address || "",
+          customer.payerName || "",
+          customer.note || "",
+          item.name || "",
+          Number(item.price) || 0,
+          Number(item.quantity) || 0,
+          Number(item.subtotal) || 0,
+          totalBoxes,
+          total
+        ]);
 
     if (itemRows.length > 0) {
       const itemStartRow = itemSheet.getLastRow() + 1;
-      const itemRange = itemSheet.getRange(itemStartRow, 1, itemRows.length, ITEM_HEADERS.length);
+      const itemHeaders = isStaffOrder ? STAFF_ITEM_HEADERS : ITEM_HEADERS;
+      const itemRange = itemSheet.getRange(itemStartRow, 1, itemRows.length, itemHeaders.length);
       itemRange.setValues(itemRows);
       itemSheet.getRange(itemStartRow, 4, itemRows.length, 1)
         .setNumberFormat("@").setValues(itemRows.map(() => [phone]));
-      itemSheet.getRange(itemStartRow, 6, itemRows.length, 1)
-        .setNumberFormat("@").setValues(itemRows.map(() => [recipientPhone]));
+      if (!isStaffOrder) {
+        itemSheet.getRange(itemStartRow, 6, itemRows.length, 1)
+          .setNumberFormat("@").setValues(itemRows.map(() => [recipientPhone]));
+      }
     }
 
     SpreadsheetApp.flush();
@@ -299,7 +362,15 @@ function getItemSheet_(spreadsheet) {
   return sheet;
 }
 
-function ensureHeader_(sheet, headers) {
+function getNamedSheet_(spreadsheet, sheetName, headers) {
+  const sheet = spreadsheet.getSheetByName(sheetName)
+    || spreadsheet.insertSheet(sheetName);
+
+  ensureHeader_(sheet, headers, false);
+  return sheet;
+}
+
+function ensureHeader_(sheet, headers, shouldMigrateRecipientColumns) {
   if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
@@ -321,12 +392,12 @@ function ensureHeader_(sheet, headers) {
     .map(value => String(value).trim());
   const hasRecipientColumns = currentHeaders.includes("택배 받는 사람 이름");
 
-  if (!hasRecipientColumns && headers[0] === "주문일시") {
+  if (shouldMigrateRecipientColumns !== false && !hasRecipientColumns && headers[0] === "주문일시") {
     const payerColumn = currentHeaders.indexOf("입금자") + 1;
     sheet.insertColumnsBefore(payerColumn > 0 ? payerColumn : 4, 2);
   }
 
-  if (!hasRecipientColumns && headers[0] === "주문번호") {
+  if (shouldMigrateRecipientColumns !== false && !hasRecipientColumns && headers[0] === "주문번호") {
     const addressColumn = currentHeaders.findIndex(value =>
       value === "받으실 주소" || value === "택배 받으실 주소"
     ) + 1;
@@ -335,6 +406,29 @@ function ensureHeader_(sheet, headers) {
 
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.setFrozenRows(1);
+}
+
+function normalizeStaffItems_(items) {
+  if (items.length === 0) {
+    throw new Error("주문할 상품을 선택해 주세요.");
+  }
+
+  return items.map(item => {
+    const product = STAFF_PRODUCTS[String(item.id || "")];
+    const quantity = Math.max(0, Math.floor(Number(item.quantity) || 0));
+
+    if (!product || quantity < 1) {
+      throw new Error("직원용 주문 상품을 확인해 주세요.");
+    }
+
+    return {
+      id: String(item.id || ""),
+      name: product.name,
+      price: product.price,
+      quantity: quantity,
+      subtotal: product.price * quantity
+    };
+  });
 }
 
 function normalizePhone_(value) {
@@ -435,6 +529,33 @@ function loadSettingsFromUrl() {
   return decodeSettings(saved) ?? defaultSettings;
 }
 
+function isStaffOrderUrl() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return new URL(window.location.href).searchParams.get("form") === "staff";
+}
+
+function getInitialSettings() {
+  const settings = loadSettingsFromUrl();
+
+  if (!isStaffOrderUrl()) {
+    return settings;
+  }
+
+  return {
+    ...settings,
+    products: staffGiftSetGuide.map(({ id, name, price }) => ({
+      id,
+      name,
+      price,
+      soldOut: false,
+      visible: true,
+    })),
+  };
+}
+
 type RemoteSettings = {
   ok?: boolean;
   shopName?: string;
@@ -526,7 +647,8 @@ function loadRemoteSettings(sheetEndpoint: string) {
 }
 
 export default function Home() {
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const isStaffOrder = isStaffOrderUrl();
+  const [settings, setSettings] = useState<Settings>(getInitialSettings);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [customer, setCustomer] = useState<Customer>({
     name: "",
@@ -550,7 +672,7 @@ export default function Home() {
 
   useEffect(() => {
     let isMounted = true;
-    const next = loadSettingsFromUrl();
+    const next = getInitialSettings();
     setSettings(next);
     setQuantities(
       Object.fromEntries(next.products.map((product) => [product.id, 0])),
@@ -593,7 +715,7 @@ export default function Home() {
 
   const productGuide = useMemo(
     () =>
-      giftSetGuide
+      (isStaffOrder ? staffGiftSetGuide : giftSetGuide)
         .filter((giftSet) =>
           settings.products.find((product) => product.id === giftSet.id)?.visible !== false,
         )
@@ -603,7 +725,7 @@ export default function Home() {
             settings.products.find((product) => product.id === giftSet.id)?.soldOut,
           ),
         })),
-    [settings.products],
+    [isStaffOrder, settings.products],
   );
 
   const cart = useMemo(
@@ -839,6 +961,7 @@ export default function Home() {
     }
 
     const payload = {
+      orderType: isStaffOrder ? "staff" : "standard",
       orderedAt: new Date().toISOString(),
       customer,
       items: cart.map(({ id, name, price, quantity, subtotal }) => ({
@@ -881,47 +1004,96 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f3eb] text-[#202016]">
+    <main
+      className={
+        isStaffOrder
+          ? "staff-order-theme min-h-screen bg-[#f2eef7] text-[#241e2b]"
+          : "min-h-screen bg-[#f6f3eb] text-[#202016]"
+      }
+    >
       <section className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 py-5">
         <header className="flex items-center justify-between pb-4">
-        <div>
-          <p className="text-sm font-semibold text-[#6d6a55]">최고급 프리미엄 유럽 포도 선물세트</p>
-          <div className="mt-1 flex items-center gap-2">
-            <img
-              alt=""
-              className="h-10 w-20 shrink-0 object-contain"
-              src={`${import.meta.env.BASE_URL}logo.png`}
-            />
-            <h1 className="text-3xl font-black tracking-normal">{settings.shopName}</h1>
+          <div>
+            <p
+              className={
+                isStaffOrder
+                  ? "text-sm font-semibold text-[#74677f]"
+                  : "text-sm font-semibold text-[#6d6a55]"
+              }
+            >
+              최고급 프리미엄 유럽 포도 선물세트
+            </p>
+            <div className="mt-1 flex items-center gap-2">
+              <img
+                alt=""
+                className="h-10 w-20 shrink-0 object-contain"
+                src={`${import.meta.env.BASE_URL}logo.png`}
+              />
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                <h1 className="text-3xl font-black tracking-normal">{settings.shopName}</h1>
+                {isStaffOrder ? (
+                  <span className="whitespace-nowrap rounded-full bg-[#6a4d7d] px-2.5 py-1 text-xs font-black text-white">
+                    (내부 직원용)
+                  </span>
+                ) : null}
+              </div>
+            </div>
           </div>
-        </div>
-          <button
-            className={
-              mode === "order"
-                ? "px-1.5 py-1 text-xs font-medium text-[#aaa491] underline-offset-2 hover:text-[#6d6a55] hover:underline"
-                : "rounded-full border border-[#d6ccb6] bg-white px-3 py-2 text-sm font-bold"
-            }
-            onClick={handleModeButton}
-            type="button"
-          >
-            {mode === "order" ? "관리" : "주문"}
-          </button>
+          {!isStaffOrder ? (
+            <button
+              className={
+                mode === "order"
+                  ? "px-1.5 py-1 text-xs font-medium text-[#aaa491] underline-offset-2 hover:text-[#6d6a55] hover:underline"
+                  : "rounded-full border border-[#d6ccb6] bg-white px-3 py-2 text-sm font-bold"
+              }
+              onClick={handleModeButton}
+              type="button"
+            >
+              {mode === "order" ? "관리" : "주문"}
+            </button>
+          ) : null}
         </header>
 
         {mode === "order" ? (
           <form className="flex flex-1 flex-col gap-4" onSubmit={submitOrder}>
             {settings.introText.trim() ? (
-              <section className="rounded-lg border border-[#d6ccb6] bg-[#fffaf0] p-4">
-                <h2 className="text-base font-black text-[#426b2f]">그랑포도 안내</h2>
+              <section
+                className={
+                  isStaffOrder
+                    ? "rounded-lg border border-[#d9cfe2] bg-[#fbf9fe] p-4"
+                    : "rounded-lg border border-[#d6ccb6] bg-[#fffaf0] p-4"
+                }
+              >
+                <h2
+                  className={
+                    isStaffOrder
+                      ? "text-base font-black text-[#6a4d7d]"
+                      : "text-base font-black text-[#426b2f]"
+                  }
+                >
+                  그랑포도 안내
+                </h2>
                 <p className="mt-3 whitespace-pre-line text-sm font-medium leading-6 text-[#4d4939]">
                   {settings.introText}
                 </p>
               </section>
             ) : null}
 
-            <section className="overflow-hidden rounded-lg border border-[#e1d7bd] bg-white">
-              <h2 className="bg-[#8e294c] px-4 py-3 text-lg font-black text-white">
-                그랑포도 선물 세트
+            <section
+              className={
+                isStaffOrder
+                  ? "overflow-hidden rounded-lg border border-[#d9cfe2] bg-white"
+                  : "overflow-hidden rounded-lg border border-[#e1d7bd] bg-white"
+              }
+            >
+              <h2
+                className={
+                  isStaffOrder
+                    ? "bg-[#6a4d7d] px-4 py-3 text-lg font-black text-white"
+                    : "bg-[#8e294c] px-4 py-3 text-lg font-black text-white"
+                }
+              >
+                {isStaffOrder ? "직원용 그랑포도" : "그랑포도 선물 세트"}
               </h2>
               <table className="w-full table-fixed border-collapse text-left">
                 <colgroup>
@@ -929,7 +1101,13 @@ export default function Home() {
                   <col className="w-[43%]" />
                   <col className="w-[27%]" />
                 </colgroup>
-                <thead className="bg-[#fffaf0] text-sm font-black text-[#9a6c25]">
+                <thead
+                  className={
+                    isStaffOrder
+                      ? "bg-[#f6f1fa] text-sm font-black text-[#6a4d7d]"
+                      : "bg-[#fffaf0] text-sm font-black text-[#9a6c25]"
+                  }
+                >
                   <tr>
                     <th className="px-3 py-3">상품명</th>
                     <th className="border-l border-[#eee5d0] px-3 py-3">상품 구성</th>
@@ -968,7 +1146,9 @@ export default function Home() {
                     className={
                       isSoldOut
                         ? "grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-[#e3b6ad] bg-[#fff7f5] p-4 shadow-sm"
-                        : "grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-[#e1d7bd] bg-white p-4 shadow-sm"
+                        : isStaffOrder
+                          ? "grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-[#d9cfe2] bg-white p-4 shadow-sm"
+                          : "grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-[#e1d7bd] bg-white p-4 shadow-sm"
                     }
                     key={product.id}
                   >
@@ -998,7 +1178,11 @@ export default function Home() {
                       <span className="w-8 text-center text-lg font-black">{quantity}</span>
                       <button
                         aria-label={`${product.name} 수량 더하기`}
-                        className="h-9 w-9 rounded-full bg-[#426b2f] text-xl font-bold text-white disabled:cursor-not-allowed disabled:bg-[#a6a091] disabled:opacity-70"
+                        className={
+                          isStaffOrder
+                            ? "h-9 w-9 rounded-full bg-[#6a4d7d] text-xl font-bold text-white disabled:cursor-not-allowed disabled:bg-[#aaa0b2] disabled:opacity-70"
+                            : "h-9 w-9 rounded-full bg-[#426b2f] text-xl font-bold text-white disabled:cursor-not-allowed disabled:bg-[#a6a091] disabled:opacity-70"
+                        }
                         disabled={isSubmitting || isSoldOut}
                         onClick={() => updateQuantity(product.id, 1)}
                         type="button"
@@ -1011,7 +1195,13 @@ export default function Home() {
               })}
             </section>
 
-            <section className="rounded-lg bg-[#202016] p-4 text-white">
+            <section
+              className={
+                isStaffOrder
+                  ? "rounded-lg bg-[#352b3d] p-4 text-white"
+                  : "rounded-lg bg-[#202016] p-4 text-white"
+              }
+            >
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-[#d8d0b9]">장바구니</span>
                 <strong>{totalBoxes}박스</strong>
@@ -1078,65 +1268,69 @@ export default function Home() {
                   value={customer.phone}
                 />
               </label>
-              <label className="flex items-center gap-2 rounded-md bg-[#f6f1e5] px-3 py-3 text-sm font-bold">
-                <input
-                  checked={isRecipientSameAsCustomer}
-                  className="h-5 w-5 accent-[#4d1630]"
-                  disabled={isSubmitting}
-                  onChange={(event) => {
-                    const isChecked = event.target.checked;
-                    setIsRecipientSameAsCustomer(isChecked);
+              {!isStaffOrder ? (
+                <>
+                  <label className="flex items-center gap-2 rounded-md bg-[#f6f1e5] px-3 py-3 text-sm font-bold">
+                    <input
+                      checked={isRecipientSameAsCustomer}
+                      className="h-5 w-5 accent-[#4d1630]"
+                      disabled={isSubmitting}
+                      onChange={(event) => {
+                        const isChecked = event.target.checked;
+                        setIsRecipientSameAsCustomer(isChecked);
 
-                    setCustomer((current) => ({
-                      ...current,
-                      recipientName: isChecked ? current.name : "",
-                      recipientPhone: isChecked ? current.phone : "",
-                    }));
-                  }}
-                  type="checkbox"
-                />
-                <span>주문자와 택배 받을 사람이 같습니다.</span>
-              </label>
-              <label className="grid gap-1 text-sm font-bold">
-                택배 받는 사람 이름
-                <input
-                  autoComplete="shipping name"
-                  className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
-                  disabled={isSubmitting || isRecipientSameAsCustomer}
-                  onChange={(event) =>
-                    setCustomer((current) => ({ ...current, recipientName: event.target.value }))
-                  }
-                  placeholder="홍길동"
-                  value={customer.recipientName}
-                />
-              </label>
-              <label className="grid gap-1 text-sm font-bold">
-                택배 받는 사람 연락처
-                <input
-                  autoComplete="shipping tel"
-                  className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
-                  disabled={isSubmitting || isRecipientSameAsCustomer}
-                  inputMode="tel"
-                  onChange={(event) =>
-                    setCustomer((current) => ({ ...current, recipientPhone: event.target.value }))
-                  }
-                  placeholder="010-0000-0000"
-                  value={customer.recipientPhone}
-                />
-              </label>
-              <label className="grid gap-1 text-sm font-bold">
-                택배 받으실 주소
-                <textarea
-                  autoComplete="street-address"
-                  className="min-h-24 rounded-md border border-[#d8cfba] px-3 py-3 text-base"
-                  disabled={isSubmitting}
-                  onChange={(event) =>
-                    setCustomer((current) => ({ ...current, address: event.target.value }))
-                  }
-                  placeholder="*택배가 1건 이상이시면, 따로 따로 주문을 해주세요."
-                  value={customer.address}
-                />
-              </label>
+                        setCustomer((current) => ({
+                          ...current,
+                          recipientName: isChecked ? current.name : "",
+                          recipientPhone: isChecked ? current.phone : "",
+                        }));
+                      }}
+                      type="checkbox"
+                    />
+                    <span>주문자와 택배 받을 사람이 같습니다.</span>
+                  </label>
+                  <label className="grid gap-1 text-sm font-bold">
+                    택배 받는 사람 이름
+                    <input
+                      autoComplete="shipping name"
+                      className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                      disabled={isSubmitting || isRecipientSameAsCustomer}
+                      onChange={(event) =>
+                        setCustomer((current) => ({ ...current, recipientName: event.target.value }))
+                      }
+                      placeholder="홍길동"
+                      value={customer.recipientName}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-bold">
+                    택배 받는 사람 연락처
+                    <input
+                      autoComplete="shipping tel"
+                      className="rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                      disabled={isSubmitting || isRecipientSameAsCustomer}
+                      inputMode="tel"
+                      onChange={(event) =>
+                        setCustomer((current) => ({ ...current, recipientPhone: event.target.value }))
+                      }
+                      placeholder="010-0000-0000"
+                      value={customer.recipientPhone}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-bold">
+                    택배 받으실 주소
+                    <textarea
+                      autoComplete="street-address"
+                      className="min-h-24 rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                      disabled={isSubmitting}
+                      onChange={(event) =>
+                        setCustomer((current) => ({ ...current, address: event.target.value }))
+                      }
+                      placeholder="*택배가 1건 이상이시면, 따로 따로 주문을 해주세요."
+                      value={customer.address}
+                    />
+                  </label>
+                </>
+              ) : null}
               <label className="grid gap-1 text-sm font-bold">
                 <span className="flex items-center gap-1">
                   입금자명 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
@@ -1152,21 +1346,29 @@ export default function Home() {
                   value={customer.payerName}
                 />
               </label>
-              <label className="grid gap-1 text-sm font-bold">
-                요청사항
-                <textarea
-                  className="min-h-24 rounded-md border border-[#d8cfba] px-3 py-3 text-base"
-                  disabled={isSubmitting}
-                  onChange={(event) =>
-                    setCustomer((current) => ({ ...current, note: event.target.value }))
-                  }
-                  placeholder="기타 요청사항이 있으면 적어주세요. 예시) 포도농장에 와서 직접 받겠습니다."
-                  value={customer.note}
-                />
-              </label>
+              {!isStaffOrder ? (
+                <label className="grid gap-1 text-sm font-bold">
+                  요청사항
+                  <textarea
+                    className="min-h-24 rounded-md border border-[#d8cfba] px-3 py-3 text-base"
+                    disabled={isSubmitting}
+                    onChange={(event) =>
+                      setCustomer((current) => ({ ...current, note: event.target.value }))
+                    }
+                    placeholder="기타 요청사항이 있으면 적어주세요. 예시) 포도농장에 와서 직접 받겠습니다."
+                    value={customer.note}
+                  />
+                </label>
+              ) : null}
             </section>
 
-            <section className="rounded-lg border border-[#d6ccb6] bg-[#fffaf0] p-4">
+            <section
+              className={
+                isStaffOrder
+                  ? "rounded-lg border border-[#d9cfe2] bg-[#fbf9fe] p-4"
+                  : "rounded-lg border border-[#d6ccb6] bg-[#fffaf0] p-4"
+              }
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold leading-6">{settings.bankNotice}</p>
@@ -1175,7 +1377,11 @@ export default function Home() {
                   </p>
                 </div>
                 <button
-                  className="shrink-0 rounded-md bg-white px-3 py-2 text-sm font-black text-[#426b2f] shadow-sm"
+                  className={
+                    isStaffOrder
+                      ? "shrink-0 rounded-md bg-white px-3 py-2 text-sm font-black text-[#6a4d7d] shadow-sm"
+                      : "shrink-0 rounded-md bg-white px-3 py-2 text-sm font-black text-[#426b2f] shadow-sm"
+                  }
                   onClick={copyBankNotice}
                   type="button"
                 >
@@ -1185,13 +1391,23 @@ export default function Home() {
             </section>
 
             {status ? (
-              <p className="rounded-md bg-white px-3 py-2 text-sm font-bold text-[#426b2f]">
+              <p
+                className={
+                  isStaffOrder
+                    ? "rounded-md bg-white px-3 py-2 text-sm font-bold text-[#6a4d7d]"
+                    : "rounded-md bg-white px-3 py-2 text-sm font-bold text-[#426b2f]"
+                }
+              >
                 {status}
               </p>
             ) : null}
 
             <button
-              className="sticky bottom-4 mt-auto rounded-lg bg-[#426b2f] px-4 py-4 text-lg font-black text-white shadow-lg disabled:cursor-not-allowed disabled:bg-[#8ba07f]"
+              className={
+                isStaffOrder
+                  ? "sticky bottom-4 mt-auto rounded-lg bg-[#6a4d7d] px-4 py-4 text-lg font-black text-white shadow-lg disabled:cursor-not-allowed disabled:bg-[#aaa0b2]"
+                  : "sticky bottom-4 mt-auto rounded-lg bg-[#426b2f] px-4 py-4 text-lg font-black text-white shadow-lg disabled:cursor-not-allowed disabled:bg-[#8ba07f]"
+              }
               disabled={isSubmitting}
               type="submit"
             >

@@ -44,3 +44,8 @@ textarea {
   background: #ffffff;
   outline-color: #426b2f;
 }
+
+.staff-order-theme input,
+.staff-order-theme textarea {
+  outline-color: #6a4d7d;
+}

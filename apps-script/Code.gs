@@ -1,5 +1,7 @@
 const ORDER_SHEET_NAME = "주문서";
 const ITEM_SHEET_NAME = "주문상품";
+const STAFF_ORDER_SHEET_NAME = "[직원용] 주문서";
+const STAFF_ITEM_SHEET_NAME = "[직원용] 주문상품";
 const SETTINGS_PROPERTY_KEY = "GRAPE_ORDER_SETTINGS";
 
 const ORDER_HEADERS = [
@@ -14,6 +16,21 @@ const ITEM_HEADERS = [
   "입금자명", "요청사항", "상품명", "단가", "수량(박스)", "소계",
   "주문 총 박스", "주문 총 금액"
 ];
+
+const STAFF_ORDER_HEADERS = [
+  "주문일시", "주문자 이름", "주문자 연락처", "입금자",
+  "주문상품", "총박스", "총금액", "주문번호"
+];
+
+const STAFF_ITEM_HEADERS = [
+  "주문번호", "주문일시", "주문자 이름", "주문자 연락처",
+  "입금자명", "상품명", "단가", "수량(박스)", "소계", "주문 총 박스", "주문 총 금액"
+];
+
+const STAFF_PRODUCTS = {
+  "staff-gold-muscat": { name: "골드머스켓 2KG", price: 15000 },
+  "staff-italia": { name: "이탈리아 2KG", price: 25000 }
+};
 
 function doGet(e) {
   const action = String((e && e.parameter && e.parameter.action) || "");
@@ -46,15 +63,21 @@ function doPost(e) {
       throw new Error("알 수 없는 요청입니다.");
     }
 
+    const isStaffOrder = String(data.orderType || "") === "staff";
     const customer = data.customer || {};
     const phone = normalizePhone_(customer.phone);
     const recipientPhone = normalizePhone_(customer.recipientPhone);
-    const items = Array.isArray(data.items) ? data.items : [];
+    const submittedItems = Array.isArray(data.items) ? data.items : [];
+    const items = isStaffOrder ? normalizeStaffItems_(submittedItems) : submittedItems;
     const storedSettings = getStoredSettings_();
     const soldOutProductIds = new Set(storedSettings.soldOutProductIds);
     const hiddenProductIds = new Set(storedSettings.hiddenProductIds);
-    const soldOutItems = items.filter(item => soldOutProductIds.has(String(item.id || "")));
-    const hiddenItems = items.filter(item => hiddenProductIds.has(String(item.id || "")));
+    const soldOutItems = isStaffOrder
+      ? []
+      : items.filter(item => soldOutProductIds.has(String(item.id || "")));
+    const hiddenItems = isStaffOrder
+      ? []
+      : items.filter(item => hiddenProductIds.has(String(item.id || "")));
 
     if (soldOutItems.length > 0) {
       throw new Error(
@@ -72,8 +95,8 @@ function doPost(e) {
 
     const orderedAt = new Date();
     const orderId = createOrderId_(orderedAt);
-    const totalBoxes = Number(data.totalBoxes) || 0;
-    const total = Number(data.total) || 0;
+    const totalBoxes = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+    const total = items.reduce((sum, item) => sum + (Number(item.subtotal) || 0), 0);
     const itemSummary = items
       .map(item => String(item.name || "") + " x " + (Number(item.quantity) || 0) + "박스")
       .join(", ");
@@ -82,55 +105,90 @@ function doPost(e) {
     hasLock = true;
 
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const orderSheet = getOrderSheet_(spreadsheet);
-    const itemSheet = getItemSheet_(spreadsheet);
+    const orderSheet = isStaffOrder
+      ? getNamedSheet_(spreadsheet, STAFF_ORDER_SHEET_NAME, STAFF_ORDER_HEADERS)
+      : getOrderSheet_(spreadsheet);
+    const itemSheet = isStaffOrder
+      ? getNamedSheet_(spreadsheet, STAFF_ITEM_SHEET_NAME, STAFF_ITEM_HEADERS)
+      : getItemSheet_(spreadsheet);
 
-    const orderRow = [
-      orderedAt,
-      customer.name || "",
-      phone,
-      customer.recipientName || "",
-      recipientPhone,
-      customer.payerName || "",
-      itemSummary,
-      customer.note || "",
-      customer.address || "",
-      totalBoxes,
-      total,
-      orderId
-    ];
+    const orderRow = isStaffOrder
+      ? [
+          orderedAt,
+          customer.name || "",
+          phone,
+          customer.payerName || "",
+          itemSummary,
+          totalBoxes,
+          total,
+          orderId
+        ]
+      : [
+          orderedAt,
+          customer.name || "",
+          phone,
+          customer.recipientName || "",
+          recipientPhone,
+          customer.payerName || "",
+          itemSummary,
+          customer.note || "",
+          customer.address || "",
+          totalBoxes,
+          total,
+          orderId
+        ];
+    const orderHeaders = isStaffOrder ? STAFF_ORDER_HEADERS : ORDER_HEADERS;
     const orderRowIndex = orderSheet.getLastRow() + 1;
-    const orderRange = orderSheet.getRange(orderRowIndex, 1, 1, ORDER_HEADERS.length);
+    const orderRange = orderSheet.getRange(orderRowIndex, 1, 1, orderHeaders.length);
     orderRange.setValues([orderRow]);
     orderRange.getCell(1, 3).setNumberFormat("@").setValue(phone);
-    orderRange.getCell(1, 5).setNumberFormat("@").setValue(recipientPhone);
+    if (!isStaffOrder) {
+      orderRange.getCell(1, 5).setNumberFormat("@").setValue(recipientPhone);
+    }
 
-    const itemRows = items.map(item => [
-      orderId,
-      orderedAt,
-      customer.name || "",
-      phone,
-      customer.recipientName || "",
-      recipientPhone,
-      customer.address || "",
-      customer.payerName || "",
-      customer.note || "",
-      item.name || "",
-      Number(item.price) || 0,
-      Number(item.quantity) || 0,
-      Number(item.subtotal) || 0,
-      totalBoxes,
-      total
-    ]);
+    const itemRows = items.map(item => isStaffOrder
+      ? [
+          orderId,
+          orderedAt,
+          customer.name || "",
+          phone,
+          customer.payerName || "",
+          item.name || "",
+          Number(item.price) || 0,
+          Number(item.quantity) || 0,
+          Number(item.subtotal) || 0,
+          totalBoxes,
+          total
+        ]
+      : [
+          orderId,
+          orderedAt,
+          customer.name || "",
+          phone,
+          customer.recipientName || "",
+          recipientPhone,
+          customer.address || "",
+          customer.payerName || "",
+          customer.note || "",
+          item.name || "",
+          Number(item.price) || 0,
+          Number(item.quantity) || 0,
+          Number(item.subtotal) || 0,
+          totalBoxes,
+          total
+        ]);
 
     if (itemRows.length > 0) {
       const itemStartRow = itemSheet.getLastRow() + 1;
-      const itemRange = itemSheet.getRange(itemStartRow, 1, itemRows.length, ITEM_HEADERS.length);
+      const itemHeaders = isStaffOrder ? STAFF_ITEM_HEADERS : ITEM_HEADERS;
+      const itemRange = itemSheet.getRange(itemStartRow, 1, itemRows.length, itemHeaders.length);
       itemRange.setValues(itemRows);
       itemSheet.getRange(itemStartRow, 4, itemRows.length, 1)
         .setNumberFormat("@").setValues(itemRows.map(() => [phone]));
-      itemSheet.getRange(itemStartRow, 6, itemRows.length, 1)
-        .setNumberFormat("@").setValues(itemRows.map(() => [recipientPhone]));
+      if (!isStaffOrder) {
+        itemSheet.getRange(itemStartRow, 6, itemRows.length, 1)
+          .setNumberFormat("@").setValues(itemRows.map(() => [recipientPhone]));
+      }
     }
 
     SpreadsheetApp.flush();
@@ -231,7 +289,15 @@ function getItemSheet_(spreadsheet) {
   return sheet;
 }
 
-function ensureHeader_(sheet, headers) {
+function getNamedSheet_(spreadsheet, sheetName, headers) {
+  const sheet = spreadsheet.getSheetByName(sheetName)
+    || spreadsheet.insertSheet(sheetName);
+
+  ensureHeader_(sheet, headers, false);
+  return sheet;
+}
+
+function ensureHeader_(sheet, headers, shouldMigrateRecipientColumns) {
   if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
@@ -252,12 +318,12 @@ function ensureHeader_(sheet, headers) {
     .map(value => String(value).trim());
   const hasRecipientColumns = currentHeaders.includes("택배 받는 사람 이름");
 
-  if (!hasRecipientColumns && headers[0] === "주문일시") {
+  if (shouldMigrateRecipientColumns !== false && !hasRecipientColumns && headers[0] === "주문일시") {
     const payerColumn = currentHeaders.indexOf("입금자") + 1;
     sheet.insertColumnsBefore(payerColumn > 0 ? payerColumn : 4, 2);
   }
 
-  if (!hasRecipientColumns && headers[0] === "주문번호") {
+  if (shouldMigrateRecipientColumns !== false && !hasRecipientColumns && headers[0] === "주문번호") {
     const addressColumn = currentHeaders.findIndex(value =>
       value === "받으실 주소" || value === "택배 받으실 주소"
     ) + 1;
@@ -266,6 +332,29 @@ function ensureHeader_(sheet, headers) {
 
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.setFrozenRows(1);
+}
+
+function normalizeStaffItems_(items) {
+  if (items.length === 0) {
+    throw new Error("주문할 상품을 선택해 주세요.");
+  }
+
+  return items.map(item => {
+    const product = STAFF_PRODUCTS[String(item.id || "")];
+    const quantity = Math.max(0, Math.floor(Number(item.quantity) || 0));
+
+    if (!product || quantity < 1) {
+      throw new Error("직원용 주문 상품을 확인해 주세요.");
+    }
+
+    return {
+      id: String(item.id || ""),
+      name: product.name,
+      price: product.price,
+      quantity: quantity,
+      subtotal: product.price * quantity
+    };
+  });
 }
 
 function normalizePhone_(value) {
