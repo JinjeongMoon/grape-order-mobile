@@ -38,7 +38,7 @@ const giftSetGuide = [
 ];
 
 const staffGiftSetGuide = [
-  { id: "staff-gold-muscat", name: "골드머스켓 2KG", composition: "친환경 그랑포도", price: 15000 },
+  { id: "staff-gold-muscat", name: "골드머스켓 2KG", composition: "친환경 그랑포도", price: 10000 },
   { id: "staff-italia", name: "이탈리아 2KG", composition: "친환경 그랑포도", price: 25000 },
 ];
 
@@ -99,7 +99,7 @@ const STAFF_ITEM_HEADERS = [
 ];
 
 const STAFF_PRODUCTS = {
-  "staff-gold-muscat": { name: "골드머스켓 2KG", price: 15000 },
+  "staff-gold-muscat": { name: "골드머스켓 2KG", price: 10000 },
   "staff-italia": { name: "이탈리아 2KG", price: 25000 }
 };
 
