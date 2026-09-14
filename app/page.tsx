@@ -21,6 +21,7 @@ type Settings = {
 type Customer = {
   name: string;
   phone: string;
+  pickupDate: string;
   recipientName: string;
   recipientPhone: string;
   address: string;
@@ -89,14 +90,16 @@ const ITEM_HEADERS = [
 ];
 
 const STAFF_ORDER_HEADERS = [
-  "주문일시", "주문자 이름", "주문자 연락처", "입금자",
+  "주문일시", "주문자 이름", "주문자 연락처", "수령 날짜", "입금자",
   "주문상품", "총박스", "총금액", "주문번호"
 ];
 
 const STAFF_ITEM_HEADERS = [
   "주문번호", "주문일시", "주문자 이름", "주문자 연락처",
-  "입금자명", "상품명", "단가", "수량(박스)", "소계", "주문 총 박스", "주문 총 금액"
+  "수령 날짜", "입금자명", "상품명", "단가", "수량(박스)", "소계", "주문 총 박스", "주문 총 금액"
 ];
+
+const STAFF_PICKUP_DATES = new Set(["9/14(월)", "9/15(화)"]);
 
 const STAFF_PRODUCTS = {
   "staff-gold-muscat": { name: "골드머스켓 2KG", price: 10000 },
@@ -138,6 +141,7 @@ function doPost(e) {
     const isStaffOrder = String(data.orderType || "") === "staff";
     const customer = data.customer || {};
     const phone = normalizePhone_(customer.phone);
+    const pickupDate = String(customer.pickupDate || "").trim();
     const recipientPhone = normalizePhone_(customer.recipientPhone);
     const submittedItems = Array.isArray(data.items) ? data.items : [];
     const items = isStaffOrder ? normalizeStaffItems_(submittedItems) : submittedItems;
@@ -146,6 +150,10 @@ function doPost(e) {
     const hiddenProductIds = new Set(storedSettings.hiddenProductIds);
     const soldOutItems = items.filter(item => soldOutProductIds.has(String(item.id || "")));
     const hiddenItems = items.filter(item => hiddenProductIds.has(String(item.id || "")));
+
+    if (isStaffOrder && !STAFF_PICKUP_DATES.has(pickupDate)) {
+      throw new Error("수령 날짜를 선택해 주세요.");
+    }
 
     if (soldOutItems.length > 0) {
       throw new Error(
@@ -186,6 +194,7 @@ function doPost(e) {
           orderedAt,
           customer.name || "",
           phone,
+          pickupDate,
           customer.payerName || "",
           itemSummary,
           totalBoxes,
@@ -222,6 +231,7 @@ function doPost(e) {
           orderedAt,
           customer.name || "",
           phone,
+          pickupDate,
           customer.payerName || "",
           item.name || "",
           Number(item.price) || 0,
@@ -371,6 +381,20 @@ function getItemSheet_(spreadsheet) {
 function getNamedSheet_(spreadsheet, sheetName, headers) {
   const sheet = spreadsheet.getSheetByName(sheetName)
     || spreadsheet.insertSheet(sheetName);
+
+  if (sheet.getLastRow() > 0 && headers.includes("수령 날짜")) {
+    const currentHeaders = sheet
+      .getRange(1, 1, 1, sheet.getLastColumn())
+      .getDisplayValues()[0]
+      .map(value => String(value).trim());
+
+    if (!currentHeaders.includes("수령 날짜")) {
+      const pickupDateIndex = headers.indexOf("수령 날짜");
+      const nextHeader = headers[pickupDateIndex + 1];
+      const nextHeaderColumn = currentHeaders.indexOf(nextHeader) + 1;
+      sheet.insertColumnBefore(nextHeaderColumn > 0 ? nextHeaderColumn : pickupDateIndex + 1);
+    }
+  }
 
   ensureHeader_(sheet, headers, false);
   return sheet;
@@ -669,6 +693,7 @@ export default function Home() {
   const [customer, setCustomer] = useState<Customer>({
     name: "",
     phone: "",
+    pickupDate: "",
     recipientName: "",
     recipientPhone: "",
     address: "",
@@ -966,6 +991,12 @@ export default function Home() {
       return;
     }
 
+    if (isStaffOrder && !customer.pickupDate) {
+      setStatus("수령 날짜를 선택해 주세요.");
+      setIsSubmitting(false);
+      return;
+    }
+
     if (cart.length === 0) {
       setStatus("상품을 1박스 이상 담아 주세요.");
       setIsSubmitting(false);
@@ -1013,6 +1044,7 @@ export default function Home() {
       setCustomer({
         name: "",
         phone: "",
+        pickupDate: "",
         recipientName: "",
         recipientPhone: "",
         address: "",
@@ -1298,6 +1330,41 @@ export default function Home() {
                   value={customer.phone}
                 />
               </label>
+              {isStaffOrder ? (
+                <fieldset className="grid gap-2">
+                  <legend className="text-sm font-bold">
+                    <span className="flex items-center gap-1">
+                      수령 날짜 <span aria-hidden="true" className="text-[#b33a2b]">*</span>
+                    </span>
+                  </legend>
+                  <div className="grid grid-cols-2 gap-2">
+                    {["9/14(월)", "9/15(화)"].map((date) => (
+                      <label
+                        className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-3 text-sm font-bold transition-colors ${
+                          customer.pickupDate === date
+                            ? "border-[#6a4d7d] bg-[#eee7f5] text-[#4f365f]"
+                            : "border-[#d9cfe2] bg-white text-[#3c3343]"
+                        }`}
+                        key={date}
+                      >
+                        <input
+                          checked={customer.pickupDate === date}
+                          className="h-5 w-5 accent-[#6a4d7d]"
+                          disabled={isSubmitting}
+                          name="pickup-date"
+                          onChange={() =>
+                            setCustomer((current) => ({ ...current, pickupDate: date }))
+                          }
+                          required
+                          type="radio"
+                          value={date}
+                        />
+                        <span>{date}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              ) : null}
               {!isStaffOrder ? (
                 <>
                   <label className="flex items-center gap-2 rounded-md bg-[#f6f1e5] px-3 py-3 text-sm font-bold">
