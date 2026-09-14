@@ -20,12 +20,12 @@ const ITEM_HEADERS = [
 
 const STAFF_ORDER_HEADERS = [
   "주문일시", "주문자 이름", "주문자 연락처", "수령 날짜", "입금자",
-  "주문상품", "총박스", "총금액", "주문번호"
+  "주문상품", "요청사항", "총박스", "총금액", "주문번호"
 ];
 
 const STAFF_ITEM_HEADERS = [
   "주문번호", "주문일시", "주문자 이름", "주문자 연락처",
-  "수령 날짜", "입금자명", "상품명", "단가", "수량(박스)", "소계", "주문 총 박스", "주문 총 금액"
+  "수령 날짜", "입금자명", "요청사항", "상품명", "단가", "수량(박스)", "소계", "주문 총 박스", "주문 총 금액"
 ];
 
 const STAFF_PICKUP_DATES = new Set(["9/14(월)", "9/15(화)"]);
@@ -125,6 +125,7 @@ function doPost(e) {
           pickupDate,
           customer.payerName || "",
           itemSummary,
+          customer.note || "",
           totalBoxes,
           total,
           orderId
@@ -160,6 +161,7 @@ function doPost(e) {
           phone,
           pickupDate,
           customer.payerName || "",
+          customer.note || "",
           item.name || "",
           Number(item.price) || 0,
           Number(item.quantity) || 0,
@@ -308,18 +310,20 @@ function getNamedSheet_(spreadsheet, sheetName, headers) {
   const sheet = spreadsheet.getSheetByName(sheetName)
     || spreadsheet.insertSheet(sheetName);
 
-  if (sheet.getLastRow() > 0 && headers.includes("수령 날짜")) {
-    const currentHeaders = sheet
-      .getRange(1, 1, 1, sheet.getLastColumn())
-      .getDisplayValues()[0]
-      .map(value => String(value).trim());
+  if (sheet.getLastRow() > 0) {
+    ["수령 날짜", "요청사항"].forEach(headerName => {
+      const currentHeaders = sheet
+        .getRange(1, 1, 1, sheet.getLastColumn())
+        .getDisplayValues()[0]
+        .map(value => String(value).trim());
 
-    if (!currentHeaders.includes("수령 날짜")) {
-      const pickupDateIndex = headers.indexOf("수령 날짜");
-      const nextHeader = headers[pickupDateIndex + 1];
-      const nextHeaderColumn = currentHeaders.indexOf(nextHeader) + 1;
-      sheet.insertColumnBefore(nextHeaderColumn > 0 ? nextHeaderColumn : pickupDateIndex + 1);
-    }
+      if (headers.includes(headerName) && !currentHeaders.includes(headerName)) {
+        const headerIndex = headers.indexOf(headerName);
+        const nextHeader = headers[headerIndex + 1];
+        const nextHeaderColumn = currentHeaders.indexOf(nextHeader) + 1;
+        sheet.insertColumnBefore(nextHeaderColumn > 0 ? nextHeaderColumn : headerIndex + 1);
+      }
+    });
   }
 
   ensureHeader_(sheet, headers, false);
